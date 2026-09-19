@@ -8,6 +8,7 @@ Started September 2026. Update status in place as versions move through design a
 ### Status legend
 
 - proposed = scoped at a high level, not yet actively designed  |  in design = actively being specified  |  planned = design settled, queued for build  |  building = in development  |  released = shipped
+
 | Version | Status | Focus | Description |
 | --- | --- | --- | --- |
 | v0.1.0 | in design | Know what your agents are doing | Visibility-first release: agent registry, event collection, activity dashboard, identity/owner/environment metadata, tool/resource activity history, search. No enforcement. Formerly "V1" in the design doc. This is the #1 focus and must not get diluted by compliance or enforcement framing. |
