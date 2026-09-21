@@ -60,4 +60,20 @@ This isn't a changelog of the product (see [`versions.md`](versions.md) for that
 
 ---
 
+## 2026-09-21 (cont'd) -- replay protection and build verification
+
+**DPoP (RFC 9449) resolves the credential-replay question.** For a short-lived credential to be replay-safe within its validity window, the agent needs to prove possession of a key, not just present the token. DPoP does this as a plain signed HTTP header per request -- no mTLS, no certificate infrastructure, no special gateway TLS termination. That header-only shape is a much better fit for a single-binary, self-hosted deployment than mTLS would be. Going into v0.2.0 alongside the credential broker itself.
+
+**Sigstore/Cosign for verifiable releases.** For a customer to trust a self-hosted open-source binary as security infrastructure, they need a way to confirm it's genuinely what the project published, not tampered with somewhere in the supply chain. Sigstore's Cosign signs releases in CI using the CI provider's own OIDC identity (GitHub Actions, in this case) -- no keys to manage -- and records the signature in a public transparency log (Rekor) anyone can check. Free, and there's a ready-made quickstart for exactly this GitHub Actions setup. Going into the v0.1.0 release process.
+
+---
+
+## 2026-09-21 (cont'd) -- console auth and pipeline isolation
+
+**Don't hand-roll console auth.** For a small, self-hosted, single-tenant admin console, the right baseline is TOTP-based MFA plus standard session hardening (httpOnly/secure/SameSite cookies, CSRF protection, rotation and revocation) via a proven library, not custom session/crypto code -- these are exactly the primitives that are easy to get subtly wrong. An optional lightweight reverse-proxy auth gate (Authelia-style, sub-20MB footprint) is a supported pattern for anyone who wants SSO in front of it. WebAuthn/passkeys is a legitimate later addition, not required for launch -- TOTP MFA is the accepted 2026 baseline for something this size.
+
+**Per-agent token-bucket rate limiting isolates a noisy agent from the rest of the fleet.** Each agent gets its own steady-rate + burst allocation at the gateway, consumed per event. A runaway or misbehaving agent can only exhaust its own quota; everyone else's visibility stays intact. This is the same pattern OpenTelemetry collectors use for per-tenant noisy-neighbor isolation in shared telemetry pipelines -- directly comparable prior art for a directly comparable problem. Excess events get rejected, not silently queued, and a rejection is itself useful signal worth alerting on.
+
+---
+
 *Sources and further detail for each entry are tracked internally; if you want a citation for something above, ask in an issue and it'll get added.*
