@@ -26,6 +26,7 @@ Apache 2.0. Self-hosted deployments are never capped by agent count — run it a
 - [`docs/versions.md`](docs/versions.md) — the version-by-version roadmap (v0.1.0 through v0.4.0)
 - [`docs/licensing-model.md`](docs/licensing-model.md) — the Free/Paid/Enterprise model
 - [`docs/how-it-works.md`](docs/how-it-works.md) — how registration, instrumentation, identity, delegation, and (eventually) the kill switch actually work
+- [`docs/research.md`](docs/research.md) — running log of the research and industry standards behind these decisions (and where to tell us if we're missing something)
 
 ## Get involved
 
