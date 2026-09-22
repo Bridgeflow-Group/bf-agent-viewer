@@ -1,0 +1,31 @@
+[project]
+name = "bf-agent-viewer"
+version = "0.1.0-dev"
+description = "Open-source, self-hosted identity and visibility layer for AI agents."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+dependencies = [
+    "fastmcp>=4.0.5",
+    "mcp>=2.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+]
+
+[project.scripts]
+bf-agent-viewer = "bf_agent_viewer.cli:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["bf_agent_viewer*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
