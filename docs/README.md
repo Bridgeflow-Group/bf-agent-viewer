@@ -6,7 +6,7 @@ An open-source, self-hosted identity and visibility layer for AI agents. Most te
 
 ## Status
 
-**Building.** Real implementation of v0.1.0 started September 22, 2026. The gateway core — per-request identity resolution, delegation-scope enforcement, rate limiting, and tamper-evident event logging — is implemented and covered by a passing test suite, including a concurrent multi-identity integration test. The console/dashboard, full backend-process sandboxing, and alerting are not yet built. See [`versions.md`](versions.md) for the version-by-version status.
+See [`status.md`](status.md) — the one place build status is kept up to date.
 
 ## Why visibility first
 
@@ -22,6 +22,7 @@ Apache 2.0. Self-hosted deployments are never capped by agent count — run it a
 
 ## Docs in this repo
 
+- [`status.md`](status.md) — current build status, the one place it's kept up to date
 - [`positioning.md`](positioning.md) — how this differs from existing agent identity/security tools, and why
 - [`market.md`](market.md) — the market this is built for
 - [`versions.md`](versions.md) — the version-by-version roadmap (v0.1.0 through v0.4.0)

@@ -6,7 +6,7 @@ An open-source, self-hosted identity and visibility layer for AI agents. Most te
 
 ## Status
 
-**Design phase. Nothing is built yet.** This repo currently holds the design documents and roadmap, published in the open so the project is transparent from day one and so early feedback can shape it before code exists.
+See [`docs/status.md`](docs/status.md) — the one place build status is kept up to date.
 
 ## Why visibility first
 
@@ -22,6 +22,7 @@ Apache 2.0. Self-hosted deployments are never capped by agent count — run it a
 
 ## Docs in this repo
 
+- [`docs/status.md`](docs/status.md) — current build status, the one place it's kept up to date
 - [`docs/positioning.md`](docs/positioning.md) — how this differs from existing agent identity/security tools, and why
 - [`docs/versions.md`](docs/versions.md) — the version-by-version roadmap (v0.1.0 through v0.4.0)
 - [`docs/licensing-model.md`](docs/licensing-model.md) — the Free/Paid/Enterprise model

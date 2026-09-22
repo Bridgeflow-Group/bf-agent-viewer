@@ -1,6 +1,6 @@
 # Security & Architecture
 
-How BF Agent Viewer is built, and — just as important — what it does and doesn't do yet. This is a design document, not an audit; nothing here is built yet (see [`versions.md`](versions.md)).
+How BF Agent Viewer is built, and — just as important — what it does and doesn't do yet. This is a design document, not an audit; see [`status.md`](status.md) for what's actually built right now.
 
 ## Why this matters now
 
