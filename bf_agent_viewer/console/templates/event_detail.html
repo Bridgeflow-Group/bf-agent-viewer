@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Event {{ event.id[:8] }} — BF Agent Viewer{% endblock %}
+{% block content %}
+<p><a href="/agents/{{ event.agent_id }}">&larr; {{ event.agent_name or event.agent_id }}</a></p>
+<h1>Event detail</h1>
+<table>
+  <tr><th>ID</th><td><code>{{ event.id }}</code></td></tr>
+  <tr><th>Occurred at</th><td>{{ event.occurred_at }}</td></tr>
+  <tr><th>Agent</th><td><a href="/agents/{{ event.agent_id }}">{{ event.agent_name or event.agent_id }}</a></td></tr>
+  <tr><th>Type</th><td>{{ event.event_type }}</td></tr>
+  <tr><th>Action</th><td>{{ event.action or "—" }}</td></tr>
+  <tr><th>Tool</th><td>{{ event.tool_id or "—" }}</td></tr>
+  <tr><th>Resource</th><td>{{ event.resource_id or "—" }}</td></tr>
+  <tr><th>Result</th><td><span class="badge {{ event.result }}">{{ event.result or "—" }}</span></td></tr>
+  <tr><th>Environment</th><td>{{ event.environment or "—" }}</td></tr>
+  <tr><th>Source</th><td>{{ event.source or "—" }}</td></tr>
+  <tr><th>Session</th><td>{{ event.session_id or "—" }}</td></tr>
+  <tr><th>Actor (human)</th><td>{{ event.actor_human_id or "—" }}</td></tr>
+  <tr><th>Request ID</th><td><code>{{ event.request_id or "—" }}</code></td></tr>
+  <tr><th>Content hash</th><td><code>{{ event.content_hash }}</code></td></tr>
+</table>
+
+<h2 style="margin-top: 2rem;">Metadata</h2>
+<pre>{{ event.metadata | tojson(indent=2) }}</pre>
+{% endblock %}

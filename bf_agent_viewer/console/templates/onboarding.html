@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Get started — BF Agent Viewer{% endblock %}
+{% block content %}
+<h1>No agents registered yet</h1>
+<p>BF Agent Viewer doesn't show anything until at least one agent identity is registered and starts calling tools through the gateway.</p>
+<h2>Register your first agent</h2>
+<p>From the command line:</p>
+<pre>bf-agent-viewer register --db bf-agent-viewer.db --org &lt;org-id&gt; \
+  --agent-id my-agent --name "My Agent" --owner &lt;human-id&gt; \
+  --scope tool_a tool_b</pre>
+<p class="muted">This prints an API token and the header name to send it with (<code>X-BF-Agent-Token</code>). Point your agent's MCP client at the gateway with that header set, and activity will start showing up here.</p>
+{% endblock %}

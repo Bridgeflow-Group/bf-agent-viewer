@@ -28,6 +28,21 @@ def cmd_register(args: argparse.Namespace) -> None:
     print("Set this as the X-BF-Agent-Token header on the agent's gateway connections.")
 
 
+def cmd_console(args: argparse.Namespace) -> None:
+    # Imported here, not at module scope: keeps `bf-agent-viewer register`
+    # (the scriptable path with no web dependencies at all) working even
+    # in a stripped-down environment where the console's deps aren't
+    # installed -- this is the only command that needs them.
+    import uvicorn
+
+    from bf_agent_viewer.console import build_console
+
+    conn = connect(args.db, check_same_thread=False)
+    app = build_console(conn, organization_id=args.org)
+    print(f"Console running at http://{args.host}:{args.port} -- no authentication yet (F-040 not built); do not expose this beyond localhost/a trusted network.")
+    uvicorn.run(app, host=args.host, port=args.port)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="bf-agent-viewer")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -41,6 +56,13 @@ def main(argv: list[str] | None = None) -> int:
     p_register.add_argument("--scope", nargs="+", required=True, help="tool names this identity may call")
     p_register.add_argument("--parent-identity", default=None)
     p_register.set_defaults(func=cmd_register)
+
+    p_console = sub.add_parser("console", help="Run the read-only web console (F-001/002/003/004/005/008)")
+    p_console.add_argument("--db", required=True)
+    p_console.add_argument("--org", default=None, help="Restrict the dashboard to one organization_id; omit to show all")
+    p_console.add_argument("--host", default="127.0.0.1")
+    p_console.add_argument("--port", type=int, default=8942)
+    p_console.set_defaults(func=cmd_console)
 
     args = parser.parse_args(argv)
     args.func(args)

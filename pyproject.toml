@@ -11,6 +11,16 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Only needed for `bf-agent-viewer console` -- the gateway/CLI register
+# path has no web-framework dependency at all. Deliberately no new
+# top-level deps beyond what fastmcp already pulls in transitively
+# (confirmed before choosing this stack); pinned here explicitly rather
+# than relying silently on that staying true.
+console = [
+    "starlette>=1.0",
+    "jinja2>=3.1",
+    "uvicorn>=0.34",
+]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
@@ -25,6 +35,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["bf_agent_viewer*"]
+
+[tool.setuptools.package-data]
+"bf_agent_viewer.console" = ["templates/*.html"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

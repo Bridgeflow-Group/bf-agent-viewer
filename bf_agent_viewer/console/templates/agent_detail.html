@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}{{ agent.name }} — BF Agent Viewer{% endblock %}
+{% block content %}
+<p><a href="/">&larr; All agents</a></p>
+<h1>{{ agent.name }}</h1>
+<table>
+  <tr><th>Owner</th><td>{{ agent.owner_name or "—" }}</td></tr>
+  <tr><th>Status</th><td><span class="badge">{{ agent.status }}</span></td></tr>
+  <tr><th>Environment</th><td>{{ agent.environment or "—" }}</td></tr>
+  <tr><th>Autonomy tier</th><td>{{ agent.autonomy_tier or "—" }}</td></tr>
+  <tr><th>Delegated from</th>
+    <td>{% if agent.parent_agent_id %}<a href="/agents/{{ agent.parent_agent_id }}">{{ agent.parent_agent_name or agent.parent_agent_id }}</a>{% else %}— (top-level){% endif %}</td>
+  </tr>
+  <tr><th>Granted scope</th>
+    <td>{% if agent.granted_scope %}{% for s in agent.granted_scope %}<code>{{ s }}</code> {% endfor %}{% else %}—{% endif %}</td>
+  </tr>
+  <tr><th>Total events</th><td>{{ agent.event_count }}</td></tr>
+</table>
+
+<h2 style="margin-top: 2rem;">Tool &amp; resource activity</h2>
+{% if events %}
+<table>
+  <thead><tr><th>Time</th><th>Type</th><th>Action</th><th>Tool</th><th>Result</th></tr></thead>
+  <tbody>
+  {% for e in events %}
+    <tr>
+      <td class="muted">{{ e.occurred_at }}</td>
+      <td>{{ e.event_type }}</td>
+      <td class="muted">{{ e.action or "—" }}</td>
+      <td class="muted">{{ e.tool_id or "—" }}</td>
+      <td><span class="badge {{ e.result }}">{{ e.result or "—" }}</span></td>
+      <td><a href="/events/{{ e.id }}">detail</a></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="empty">No activity recorded for this agent yet.</p>
+{% endif %}
+{% endblock %}

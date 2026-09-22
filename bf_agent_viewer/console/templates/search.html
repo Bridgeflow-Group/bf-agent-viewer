@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Search — BF Agent Viewer{% endblock %}
+{% block content %}
+<h1>Search{% if q %}: "{{ q }}"{% endif %}</h1>
+
+{% if q %}
+<h2>Agents</h2>
+{% if results.agents %}
+<table>
+  <thead><tr><th>Name</th><th>Owner</th><th>Status</th></tr></thead>
+  <tbody>
+  {% for a in results.agents %}
+    <tr><td><a href="/agents/{{ a.id }}">{{ a.name }}</a></td><td>{{ a.owner_name or "—" }}</td><td><span class="badge">{{ a.status }}</span></td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}<p class="empty">No matching agents.</p>{% endif %}
+
+<h2 style="margin-top: 2rem;">Events</h2>
+{% if results.events %}
+<table>
+  <thead><tr><th>Time</th><th>Agent</th><th>Type</th><th>Tool</th><th>Result</th></tr></thead>
+  <tbody>
+  {% for e in results.events %}
+    <tr>
+      <td class="muted">{{ e.occurred_at }}</td>
+      <td><a href="/agents/{{ e.agent_id }}">{{ e.agent_name or e.agent_id }}</a></td>
+      <td>{{ e.event_type }}</td>
+      <td class="muted">{{ e.tool_id or "—" }}</td>
+      <td><span class="badge {{ e.result }}">{{ e.result or "—" }}</span></td>
+      <td><a href="/events/{{ e.id }}">detail</a></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}<p class="empty">No matching events.</p>{% endif %}
+{% else %}
+<p class="empty">Enter a search term above.</p>
+{% endif %}
+{% endblock %}
