@@ -13,6 +13,7 @@ import sqlite3
 from pathlib import Path
 
 _SCHEMA_PATH = Path(__file__).with_name("schema.sql")
+_MIGRATIONS_PATH = Path(__file__).with_name("migrations.sql")
 
 
 def connect(path: str | os.PathLike, *, check_same_thread: bool = True) -> sqlite3.Connection:
@@ -43,6 +44,14 @@ def connect(path: str | os.PathLike, *, check_same_thread: bool = True) -> sqlit
         with open(_SCHEMA_PATH) as f:
             conn.executescript(f.read())
         conn.commit()
+    # migrations.sql is additive-only (CREATE TABLE/INDEX IF NOT EXISTS)
+    # and safe to run on every connect(), unlike schema.sql above -- this
+    # is how a table added after a database already exists (e.g. F-040's
+    # console_credentials/console_sessions) reaches an existing install
+    # without a separate migration command to remember to run.
+    with open(_MIGRATIONS_PATH) as f:
+        conn.executescript(f.read())
+    conn.commit()
     return conn
 
 

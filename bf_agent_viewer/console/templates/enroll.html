@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Set up your authenticator — BF Agent Viewer{% endblock %}
+{% block content %}
+<h1>Set up two-factor authentication</h1>
+{% if error %}<p style="color:#ff9d9d;">{{ error }}</p>{% endif %}
+<p class="muted">This account doesn't have an authenticator app enrolled yet. Add this account to an authenticator app (Google Authenticator, 1Password, Authy, etc.), then enter the current code below to finish logging in. There is no path that skips this step.</p>
+<p>Secret (enter manually, or use the URI with an app that accepts it):</p>
+<pre>{{ totp_secret }}</pre>
+<pre style="white-space:pre-wrap; word-break:break-all;">{{ otpauth_uri }}</pre>
+<form method="post" action="/login/enroll" style="max-width:240px; display:flex; flex-direction:column; gap:0.75rem; margin-top:1rem;">
+  <input type="text" name="code" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" autofocus required
+         style="width:100%; padding:0.4rem 0.6rem; border-radius:4px; border:1px solid #33363f; background:#1a1c22; color:#e6e6e6; letter-spacing:0.2em; text-align:center;">
+  <button type="submit" style="padding:0.5rem 0.8rem; border-radius:4px; border:none; background:#2b6cb0; color:white; cursor:pointer;">Confirm and finish setup</button>
+</form>
+{% endblock %}

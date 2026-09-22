@@ -1,21 +1,42 @@
 """Real requests through Starlette's TestClient against a seeded SQLite
-DB -- assert actual rendered page content, not just a 200 status."""
+DB -- assert actual rendered page content, not just a 200 status.
+
+Every test here goes through the real login flow (auth.py), not a bypass
+-- if the auth wiring in app.py ever breaks, these tests should be the
+ones that catch it, not just test_console_auth.py."""
+import pyotp
 import pytest
 
 starlette_testclient = pytest.importorskip("starlette.testclient")
 TestClient = starlette_testclient.TestClient
 
-from bf_agent_viewer.console import build_console
+from bf_agent_viewer.console import auth, build_console
 from bf_agent_viewer.db import reset
 from bf_agent_viewer.events import last_hash, log_event
 from bf_agent_viewer.identity import register_identity
+
+PASSWORD = "correct horse battery staple"
+
+
+def _login(client, conn, *, email="ada@example.com", password=PASSWORD):
+    """Drives the real two-step login (password, then first-time TOTP
+    enrollment) and leaves the client holding a valid session cookie."""
+    result = auth.start_login(conn, email=email, password=password)
+    assert result.status == "needs_enrollment"
+    secret, _uri = auth.totp_provisioning_uri(conn, result.human_id)
+    code = pyotp.TOTP(secret).now()
+    client.cookies.set("bf_console_pending", result.pending_token)
+    resp = client.post("/login/enroll", data={"code": code}, follow_redirects=False)
+    assert resp.status_code == 303
+    assert "bf_console_session" in client.cookies
 
 
 def _seed(conn):
     conn.execute("INSERT INTO organizations (id, name) VALUES ('org-1', 'Org')")
     conn.execute(
-        "INSERT INTO humans (id, organization_id, name) VALUES ('human-1', 'org-1', 'Ada Owner')"
+        "INSERT INTO humans (id, organization_id, name, email) VALUES ('human-1', 'org-1', 'Ada Owner', 'ada@example.com')"
     )
+    auth.provision_console_user(conn, human_id="human-1", password=PASSWORD, account_label="ada@example.com")
     parent = register_identity(
         conn, organization_id="org-1", agent_id="agent-orchestrator", agent_name="Orchestrator",
         owner_human_id="human-1", subject="agent-orchestrator",
@@ -47,7 +68,9 @@ def client(tmp_path):
     conn = reset(tmp_path / "console_test.db", check_same_thread=False)
     event_id = _seed(conn)
     app = build_console(conn)
-    return TestClient(app), event_id, conn
+    c = TestClient(app)
+    _login(c, conn)
+    return c, event_id, conn
 
 
 def test_dashboard_lists_agents_and_recent_events(client):
@@ -63,8 +86,14 @@ def test_dashboard_lists_agents_and_recent_events(client):
 
 def test_dashboard_shows_onboarding_when_no_agents(tmp_path):
     conn = reset(tmp_path / "empty.db", check_same_thread=False)
+    conn.execute("INSERT INTO organizations (id, name) VALUES ('org-1', 'Org')")
+    conn.execute(
+        "INSERT INTO humans (id, organization_id, name, email) VALUES ('human-1', 'org-1', 'Ada', 'ada@example.com')"
+    )
+    auth.provision_console_user(conn, human_id="human-1", password=PASSWORD, account_label="ada@example.com")
     app = build_console(conn)
     c = TestClient(app)
+    _login(c, conn)
     resp = c.get("/")
     assert resp.status_code == 200
     assert "No agents registered yet" in resp.text
@@ -148,9 +177,23 @@ def test_console_scoped_to_organization(tmp_path):
         conn, organization_id="org-b", agent_id="agent-b", agent_name="Agent B",
         owner_human_id="h-b", subject="agent-b", granted_scope=["get_weather"],
     )
+    conn.execute(
+        "UPDATE humans SET email = 'a@example.com' WHERE id = 'h-a'"
+    )
+    auth.provision_console_user(conn, human_id="h-a", password=PASSWORD, account_label="a@example.com")
     conn.commit()
 
     app = build_console(conn, organization_id="org-a")
-    resp = TestClient(app).get("/")
+    c = TestClient(app)
+    _login(c, conn, email="a@example.com")
+    resp = c.get("/")
     assert "Agent A" in resp.text
     assert "Agent B" not in resp.text
+
+
+def test_unauthenticated_request_redirects_to_login(tmp_path):
+    conn = reset(tmp_path / "unauth.db", check_same_thread=False)
+    app = build_console(conn)
+    resp = TestClient(app).get("/", follow_redirects=False)
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "/login"

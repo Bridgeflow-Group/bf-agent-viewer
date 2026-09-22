@@ -26,10 +26,18 @@
 <body>
 <header>
   <a href="/">BF Agent Viewer</a>
+  {% if current_user_name %}
   <form class="search" action="/search" method="get">
     <input type="text" name="q" placeholder="Search agents, events, tools..." value="{{ q or '' }}">
     <button type="submit">Search</button>
   </form>
+  <div class="muted" style="display:flex; align-items:center; gap:0.75rem;">
+    <span>{{ current_user_name }}</span>
+    <form action="/logout" method="post" style="margin:0;">
+      <button type="submit" style="background:none; border:none; color:#7db4ff; cursor:pointer; padding:0; font:inherit;">Log out</button>
+    </form>
+  </div>
+  {% endif %}
 </header>
 <main>
 {% block content %}{% endblock %}

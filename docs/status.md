@@ -10,13 +10,13 @@ The one place this repo's current build status gets updated. Every other doc tha
 
 - Gateway core — per-request identity resolution (bearer-token based, not clientInfo-cached), delegation-scope enforcement (narrower-than-parent checked at registration and enforced at call time), per-agent rate limiting, tamper-evident event logging (hash-chained)
 - Sandboxed backend process spawning — environment-variable allowlisting and POSIX resource-limit hardening, plus real filesystem/network isolation via a locked-down Docker container when Docker is available (falls back to the rlimit-only path with a logged warning otherwise, never silently)
-- Console — read-only dashboard, agent detail (identity, delegation chain, granted scope), event detail, search, onboarding empty-state. Server-rendered (Starlette + Jinja2), no new dependencies beyond what the gateway already pulls in. **No authentication yet** — local/trusted-network use only until F-040 (TOTP MFA + hardened sessions) lands; not exposed by default, but stated here plainly rather than left implicit
-- Test suite covering identity resolution, scope enforcement, rate limiting, event-chain integrity, sandboxing (both the rlimit and container paths, verified against real spawned processes), the console (real requests against a seeded database), and a concurrent multi-identity integration test against a real running gateway process
+- Console — read-only dashboard, agent detail (identity, delegation chain, granted scope), event detail, search, onboarding empty-state. Server-rendered (Starlette + Jinja2), no new web-framework dependencies beyond what the gateway already pulls in
+- Console authentication (F-040) — password + mandatory TOTP MFA (`pyotp`), hardened sessions (hashed tokens, 12h expiry, httpOnly/SameSite=Strict cookies), lockout after 5 failed passwords. No console route is reachable without a valid session; first login forces MFA enrollment before any session is issued. `bf-agent-viewer console-user create` provisions the first login. See [`security.md`](security.md) for the mechanism
+- Test suite covering identity resolution, scope enforcement, rate limiting, event-chain integrity, sandboxing (both the rlimit and container paths, verified against real spawned processes), the console and its auth flow (real requests against a seeded database, driven through the actual login/enroll/verify HTTP routes, not a bypass), and a concurrent multi-identity integration test against a real running gateway process
 
 **Not yet built:**
 
 - Alerting
-- Console authentication (F-040)
 - The production backend-sandbox container image (`docker/backend-sandbox/Dockerfile`) hasn't been built or tested on a host with normal registry access yet — only against a registry-free local substitute used for testing
 
 For the version-by-version roadmap (v0.1.0 through v0.4.0) and what each future release is scoped to do, see [`versions.md`](versions.md). For the day-by-day research and validation log behind these decisions, see [`research.md`](research.md).

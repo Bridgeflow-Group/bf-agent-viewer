@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Verify — BF Agent Viewer{% endblock %}
+{% block content %}
+<h1>Enter your authenticator code</h1>
+{% if error %}<p style="color:#ff9d9d;">{{ error }}</p>{% endif %}
+<p class="muted">Password confirmed. Enter the current 6-digit code from your authenticator app.</p>
+<form method="post" action="/login/verify" style="max-width:240px; display:flex; flex-direction:column; gap:0.75rem;">
+  <input type="text" name="code" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" autofocus required
+         style="width:100%; padding:0.4rem 0.6rem; border-radius:4px; border:1px solid #33363f; background:#1a1c22; color:#e6e6e6; letter-spacing:0.2em; text-align:center;">
+  <button type="submit" style="padding:0.5rem 0.8rem; border-radius:4px; border:none; background:#2b6cb0; color:white; cursor:pointer;">Verify</button>
+</form>
+<p class="muted" style="margin-top:1rem;">A wrong or expired code sends you back to the start of login — that's intentional (see docs/security.md on why the pending-login token is one-shot).</p>
+{% endblock %}
