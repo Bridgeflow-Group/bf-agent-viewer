@@ -52,6 +52,12 @@ def gateway_setup(tmp_path):
 
     gateway, middleware = build_gateway(
         conn, backend_script=BACKEND_SCRIPT, organization_id="org-1", write_tools=WRITE_TOOLS,
+        # This test is about identity/scope correctness, not sandboxing --
+        # the container path has its own dedicated coverage in
+        # test_container_sandbox.py. Forcing the rlimit-bootstrap path
+        # here keeps this test from depending on the production sandbox
+        # image being built/pulled (see ISS-017's container-image note).
+        prefer_container=False,
     )
     return conn, gateway, orchestrator_token, subagent_token
 

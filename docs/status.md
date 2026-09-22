@@ -9,12 +9,13 @@ The one place this repo's current build status gets updated. Every other doc tha
 **Built and passing tests:**
 
 - Gateway core — per-request identity resolution (bearer-token based, not clientInfo-cached), delegation-scope enforcement (narrower-than-parent checked at registration and enforced at call time), per-agent rate limiting, tamper-evident event logging (hash-chained)
-- Test suite covering identity resolution, scope enforcement, rate limiting, event-chain integrity, and a concurrent multi-identity integration test against a real running gateway process
+- Sandboxed backend process spawning — environment-variable allowlisting and POSIX resource-limit hardening, plus real filesystem/network isolation via a locked-down Docker container when Docker is available (falls back to the rlimit-only path with a logged warning otherwise, never silently)
+- Test suite covering identity resolution, scope enforcement, rate limiting, event-chain integrity, sandboxing (both the rlimit and container paths, verified against real spawned processes), and a concurrent multi-identity integration test against a real running gateway process
 
 **Not yet built:**
 
 - Console / dashboard
-- Full backend-process sandboxing — environment-variable allowlisting is wired in; POSIX resource-limit hardening and filesystem/network isolation are not
 - Alerting
+- The production backend-sandbox container image (`docker/backend-sandbox/Dockerfile`) hasn't been built or tested on a host with normal registry access yet — only against a registry-free local substitute used for testing
 
 For the version-by-version roadmap (v0.1.0 through v0.4.0) and what each future release is scoped to do, see [`versions.md`](versions.md). For the day-by-day research and validation log behind these decisions, see [`research.md`](research.md).
