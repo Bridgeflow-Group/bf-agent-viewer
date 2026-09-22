@@ -26,7 +26,11 @@ Apache 2.0. Self-hosted deployments are never capped by agent count — run it a
 - [`docs/versions.md`](docs/versions.md) — the version-by-version roadmap (v0.1.0 through v0.4.0)
 - [`docs/licensing-model.md`](docs/licensing-model.md) — the Free/Paid/Enterprise model
 - [`docs/how-it-works.md`](docs/how-it-works.md) — how registration, instrumentation, identity, delegation, and (eventually) the kill switch actually work
-- [`docs/research.md`](docs/research.md) — running log of the research and industry standards behind these decisions (and where to tell us if we're missing something)
+- [`docs/market.md`](docs/market.md) — the market data behind the thesis: adoption, incidents, the identity governance gap, regulatory pressure
+- [`docs/security.md`](docs/security.md) — the security model and architecture, including an honest list of what v0.1.0 doesn't do yet
+- [`docs/regulatory.md`](docs/regulatory.md) — how the design maps to the EU AI Act, NIST AI RMF, and other current frameworks
+- [`docs/standards.md`](docs/standards.md) — which technical/security standards (MCP security best practices, OWASP Agentic Top 10, DPoP, Sigstore, and more) this design follows, tracks, or has deliberately not adopted, and why
+- [`docs/research.md`](docs/research.md) — running log of research and industry standards behind these decisions (and where to tell us if we're missing something)
 
 ## Get involved
 
