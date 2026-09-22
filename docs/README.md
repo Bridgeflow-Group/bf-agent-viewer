@@ -8,6 +8,16 @@ An open-source, self-hosted identity and visibility layer for AI agents. Most te
 
 See [`status.md`](status.md) — the one place build status is kept up to date.
 
+## Quickstart
+
+```
+git clone https://github.com/Bridgeflow-Group/bf-agent-viewer.git
+cd bf-agent-viewer
+docker compose up -d --build
+```
+
+Starts the gateway (`:8941`) and console (`:8942`) against a small bundled example MCP server. See the repo root [`README.md`](../README.md) for the one-time bootstrap commands (org/human/agent/console-login) and what to swap in for your own backend.
+
 ## Why visibility first
 
 A kill switch without a clear audit trail tells you *that* something went wrong, not *which* tool call crossed the line. So v0.1.0 does one thing: agent registry, activity/event logging, identity and ownership metadata, search. No policy enforcement, no kill switch — those come later, once there's something real to enforce against. See [`versions.md`](versions.md) for the full roadmap.
@@ -23,6 +33,7 @@ Apache 2.0. Self-hosted deployments are never capped by agent count — run it a
 ## Docs in this repo
 
 - [`status.md`](status.md) — current build status, the one place it's kept up to date
+- [`CLI.md`](CLI.md) — every `bf-agent-viewer` command, its flags and env vars, and a complete first-run walkthrough
 - [`positioning.md`](positioning.md) — how this differs from existing agent identity/security tools, and why
 - [`market.md`](market.md) — the market this is built for
 - [`versions.md`](versions.md) — the version-by-version roadmap (v0.1.0 through v0.4.0)

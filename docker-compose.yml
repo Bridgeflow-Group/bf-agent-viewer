@@ -1,0 +1,61 @@
+# Single `docker compose up` self-hosted deployment (F-018/T-009). Two
+# services built from one image (docker/app/Dockerfile) -- gateway and
+# console -- sharing one SQLite database file on a named volume. First
+# run needs a one-time bootstrap (org, human, agent registration, console
+# login) -- see README.md's Quickstart for the exact commands.
+#
+# Backend sandboxing tradeoff, stated plainly rather than glossed over
+# (see docs/security.md): the gateway prefers to spawn its backend MCP
+# server inside a locked-down Docker container when one is available.
+# Doing that from *inside* this stack's own gateway container would mean
+# mounting the host's Docker socket into it (Docker-outside-of-Docker),
+# which would hand a compromised gateway process root-equivalent access
+# to the host -- undermining the exact isolation container sandboxing
+# exists to provide. So this file does not mount the socket, and the
+# gateway service runs with BF_NO_CONTAINER=1: the rlimit-only sandbox
+# path (env allowlist + POSIX resource limits), the same protection
+# level as any host without Docker installed. A bare-metal/host install
+# (running `bf-agent-viewer gateway` directly, not via this file) gets
+# the full container-sandboxed path. Known limitation, tracked in
+# docs/status.md, not a silent gap.
+
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile: docker/app/Dockerfile
+    environment:
+      BF_DB: /data/bf.db
+      BF_ORG: ${BF_ORG:-org-1}
+      BF_BACKEND_SCRIPT: /app/examples/demo_backend.py
+      BF_WRITE_TOOLS: send_email
+      BF_GATEWAY_HOST: 0.0.0.0
+      BF_GATEWAY_PORT: "8941"
+      BF_NO_CONTAINER: "1"
+    command: ["bf-agent-viewer", "gateway"]
+    ports:
+      - "8941:8941"
+    volumes:
+      - bf_data:/data
+    restart: unless-stopped
+
+  console:
+    build:
+      context: .
+      dockerfile: docker/app/Dockerfile
+    environment:
+      BF_DB: /data/bf.db
+      BF_ORG: ${BF_ORG:-org-1}
+      BF_CONSOLE_HOST: 0.0.0.0
+      BF_CONSOLE_PORT: "8942"
+    command: ["bf-agent-viewer", "console"]
+    ports:
+      - "8942:8942"
+    volumes:
+      - bf_data:/data
+    depends_on:
+      - gateway
+    restart: unless-stopped
+
+volumes:
+  bf_data:
