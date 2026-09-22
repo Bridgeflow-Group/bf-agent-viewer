@@ -47,3 +47,22 @@ CREATE TABLE IF NOT EXISTS console_pending_logins (
     created_at          TEXT NOT NULL DEFAULT (datetime('now')),
     expires_at          TEXT NOT NULL
 );
+
+-- alerts (F-036): persisted independently of delivery -- `delivered`
+-- records what actually happened, not what was attempted, so a fired
+-- alert whose webhook/email failed is still visible later (a future
+-- console alerts view, not yet built, would read this table), not lost.
+-- See bf_agent_viewer/alerts/service.py.
+CREATE TABLE IF NOT EXISTS alerts (
+    id                  TEXT PRIMARY KEY,
+    organization_id     TEXT NOT NULL REFERENCES organizations(id),
+    agent_id            TEXT REFERENCES agents(id),
+    alert_type          TEXT NOT NULL,
+    severity            TEXT NOT NULL,
+    message             TEXT NOT NULL,
+    metadata            TEXT,
+    delivered           INTEGER NOT NULL DEFAULT 0,
+    created_at          TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_alerts_org_time ON alerts(organization_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_alerts_agent ON alerts(agent_id);

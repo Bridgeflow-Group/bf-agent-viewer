@@ -64,6 +64,32 @@ def cmd_register(args: argparse.Namespace) -> None:
     print("Set this as the X-BF-Agent-Token header on the agent's gateway connections.")
 
 
+def _build_alert_channel(args: argparse.Namespace):
+    """Fans out to whichever of --alert-webhook/--alert-email-* were
+    configured. Returns None (build_gateway/GatewayMiddleware then default
+    to LoggingAlertChannel) when neither is set -- alerts still fire, they
+    just go to the gateway's own log rather than nowhere."""
+    from bf_agent_viewer.alerts import CompositeAlertChannel, EmailAlertChannel, WebhookAlertChannel
+
+    channels = []
+    if args.alert_webhook:
+        channels.append(WebhookAlertChannel(args.alert_webhook))
+    if args.alert_email_to:
+        if not args.alert_email_smtp_host or not args.alert_email_from:
+            print("--alert-email-to requires --alert-email-smtp-host and --alert-email-from.")
+            raise SystemExit(1)
+        channels.append(EmailAlertChannel(
+            smtp_host=args.alert_email_smtp_host, smtp_port=args.alert_email_smtp_port,
+            from_addr=args.alert_email_from,
+            to_addrs=[a.strip() for a in args.alert_email_to.split(",") if a.strip()],
+            username=args.alert_email_user, password=args.alert_email_password,
+            use_tls=not args.alert_email_no_tls,
+        ))
+    if not channels:
+        return None
+    return channels[0] if len(channels) == 1 else CompositeAlertChannel(channels)
+
+
 def cmd_gateway(args: argparse.Namespace) -> None:
     from bf_agent_viewer.gateway import build_gateway
     from bf_agent_viewer.ratelimit import TokenBucketLimiter
@@ -71,12 +97,16 @@ def cmd_gateway(args: argparse.Namespace) -> None:
     conn = connect(args.db)
     write_tools = {t.strip() for t in args.write_tools.split(",") if t.strip()}
     limiter = TokenBucketLimiter(rate=args.rate_limit, burst=args.rate_burst)
+    alert_channel = _build_alert_channel(args)
+    if alert_channel is None:
+        print("No alert channel configured (--alert-webhook / --alert-email-to) -- alerts still fire, logged at WARNING/ERROR via this process's own logger.")
     gateway, _middleware = build_gateway(
         conn,
         backend_script=args.backend_script,
         organization_id=args.org,
         write_tools=write_tools,
         rate_limiter=limiter,
+        alert_channel=alert_channel,
         prefer_container=not args.no_container,
     )
     if args.no_container:
@@ -173,6 +203,14 @@ def main(argv: list[str] | None = None) -> int:
     p_gateway.add_argument("--rate-limit", type=float, default=float(_env_default("BF_RATE_LIMIT", "5.0")), help="Steady tokens/sec per agent identity")
     p_gateway.add_argument("--rate-burst", type=float, default=float(_env_default("BF_RATE_BURST", "20.0")))
     p_gateway.add_argument("--no-container", action="store_true", default=_env_default("BF_NO_CONTAINER", "") not in ("", "0", "false", "False"), help="Force the rlimit-only sandbox path even if Docker is available (BF_NO_CONTAINER) -- the compose deployment sets this; see docker-compose.yml for why")
+    p_gateway.add_argument("--alert-webhook", default=_env_default("BF_ALERT_WEBHOOK"), help="URL to POST a JSON alert to, e.g. on rate-limit rejection (F-036) (BF_ALERT_WEBHOOK)")
+    p_gateway.add_argument("--alert-email-to", default=_env_default("BF_ALERT_EMAIL_TO"), help="Comma-separated recipient addresses (BF_ALERT_EMAIL_TO)")
+    p_gateway.add_argument("--alert-email-from", default=_env_default("BF_ALERT_EMAIL_FROM"))
+    p_gateway.add_argument("--alert-email-smtp-host", default=_env_default("BF_ALERT_EMAIL_SMTP_HOST"))
+    p_gateway.add_argument("--alert-email-smtp-port", type=int, default=int(_env_default("BF_ALERT_EMAIL_SMTP_PORT", "587")))
+    p_gateway.add_argument("--alert-email-user", default=_env_default("BF_ALERT_EMAIL_USER"))
+    p_gateway.add_argument("--alert-email-password", default=_env_default("BF_ALERT_EMAIL_PASSWORD"), help="Prefer BF_ALERT_EMAIL_PASSWORD over this flag -- avoids the password landing in shell history/process listings")
+    p_gateway.add_argument("--alert-email-no-tls", action="store_true", default=_env_default("BF_ALERT_EMAIL_NO_TLS", "") not in ("", "0", "false", "False"))
     p_gateway.set_defaults(func=cmd_gateway)
 
     p_console = sub.add_parser("console", help="Run the read-only web console (F-001/002/003/004/005/008), login required (F-040)")

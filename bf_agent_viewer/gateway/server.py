@@ -10,6 +10,7 @@ from fastmcp import FastMCP
 from fastmcp.client.transports import StdioTransport
 from fastmcp.server.providers.proxy import ProxyClient, ProxyProvider
 
+from bf_agent_viewer.alerts import AlertChannel
 from bf_agent_viewer.gateway.middleware import GatewayMiddleware
 from bf_agent_viewer.gateway.sandbox import (
     ContainerPolicy,
@@ -27,6 +28,7 @@ def build_gateway(
     write_tools: set[str],
     name: str = "bf-agent-viewer-gateway",
     rate_limiter: TokenBucketLimiter | None = None,
+    alert_channel: AlertChannel | None = None,
     sandbox_policy: SandboxPolicy | None = None,
     container_policy: ContainerPolicy | None = None,
     prefer_container: bool = True,
@@ -60,6 +62,7 @@ def build_gateway(
         organization_id=organization_id,
         write_tools=write_tools,
         rate_limiter=rate_limiter,
+        alert_channel=alert_channel,
     )
     gateway.add_middleware(middleware)
     return gateway, middleware

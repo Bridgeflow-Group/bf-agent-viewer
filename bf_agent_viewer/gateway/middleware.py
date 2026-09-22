@@ -31,6 +31,7 @@ from typing import Any
 
 from fastmcp.server.middleware import CallNext, Middleware, MiddlewareContext
 
+from bf_agent_viewer.alerts import AlertChannel, LoggingAlertChannel, fire_alert
 from bf_agent_viewer.events import last_hash, log_event
 from bf_agent_viewer.identity import Identity, load_token_registry
 from bf_agent_viewer.ratelimit import TokenBucketLimiter
@@ -77,11 +78,16 @@ class GatewayMiddleware(Middleware):
         organization_id: str,
         write_tools: set[str],
         rate_limiter: TokenBucketLimiter | None = None,
+        alert_channel: AlertChannel | None = None,
     ):
         self.conn = conn
         self.organization_id = organization_id
         self.write_tools = write_tools
         self.rate_limiter = rate_limiter or TokenBucketLimiter()
+        # F-036: defaults to LoggingAlertChannel, never a no-op -- an
+        # unconfigured deployment still sees rate-limit rejections in its
+        # own logs, rather than the alert silently going nowhere.
+        self.alert_channel = alert_channel or LoggingAlertChannel()
 
         self.running_hash = last_hash(conn)
         self.token_registry = load_token_registry(conn)
@@ -114,6 +120,17 @@ class GatewayMiddleware(Middleware):
                 prev_hash=self.running_hash,
             )
             self.conn.commit()
+            # security.md's own stated promise: "a rejection itself is
+            # surfaced as an alert" (F-036/F-041). fire_alert() persists
+            # regardless of delivery and never raises on a delivery
+            # failure, so this can't turn a rate-limit rejection into an
+            # unrelated 500 if the configured channel is unreachable.
+            fire_alert(
+                self.conn, self.alert_channel, organization_id=self.organization_id,
+                agent_id=agent_id, alert_type="rate_limited", severity="warning",
+                message=f"agent '{agent_id}' exceeded its rate limit calling '{tool_name}'",
+                metadata={"tool": tool_name},
+            )
             raise PermissionError(f"agent '{agent_id}' exceeded its rate limit")
 
         # Scope enforcement (OQ-003): a registered identity's granted_scope

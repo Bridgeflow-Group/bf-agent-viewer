@@ -69,8 +69,18 @@ Runs the gateway: a persistent process that proxies to one backend MCP server, r
 | `--rate-limit` | `BF_RATE_LIMIT` | `5.0` | Steady tokens/sec per agent identity |
 | `--rate-burst` | `BF_RATE_BURST` | `20.0` | Burst allowance above the steady rate |
 | `--no-container` | `BF_NO_CONTAINER` | off | Forces the rlimit-only backend sandbox even if Docker is available |
+| `--alert-webhook` | `BF_ALERT_WEBHOOK` | none | URL to POST a JSON alert to (F-036) — e.g. on a rate-limit rejection |
+| `--alert-email-to` | `BF_ALERT_EMAIL_TO` | none | Comma-separated recipient addresses |
+| `--alert-email-from` | `BF_ALERT_EMAIL_FROM` | — | Required if `--alert-email-to` is set |
+| `--alert-email-smtp-host` | `BF_ALERT_EMAIL_SMTP_HOST` | — | Required if `--alert-email-to` is set |
+| `--alert-email-smtp-port` | `BF_ALERT_EMAIL_SMTP_PORT` | `587` | |
+| `--alert-email-user` | `BF_ALERT_EMAIL_USER` | none | Omit for an unauthenticated/allowlisted relay |
+| `--alert-email-password` | `BF_ALERT_EMAIL_PASSWORD` | none | Prefer the env var over the flag — avoids the password landing in shell history |
+| `--alert-email-no-tls` | `BF_ALERT_EMAIL_NO_TLS` | off | Skips STARTTLS |
 
 By default the gateway spawns the backend script inside a locked-down Docker container when Docker is reachable (real filesystem/network isolation), falling back to rlimit-only sandboxing with a logged warning when it isn't — never silently. `--no-container`/`BF_NO_CONTAINER=1` forces the fallback path deliberately; the Docker Compose deployment sets this (see the comment at the top of [`docker-compose.yml`](../docker-compose.yml) for why mounting the host's Docker socket into the gateway's own container isn't the answer).
+
+Neither `--alert-webhook` nor `--alert-email-to` is required — with neither set, alerts still fire, just to the gateway's own log (WARNING, or ERROR for `critical` severity) rather than a channel. Set both to fan an alert out to each independently; one failing to deliver doesn't stop the other from being tried. Every alert is persisted to the database regardless of delivery, so a webhook outage or SMTP failure doesn't mean the alert never happened.
 
 ## `console`
 
