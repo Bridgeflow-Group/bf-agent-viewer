@@ -108,6 +108,7 @@ def cmd_gateway(args: argparse.Namespace) -> None:
         rate_limiter=limiter,
         alert_channel=alert_channel,
         prefer_container=not args.no_container,
+        gap_threshold_seconds=args.gap_threshold,
     )
     if args.no_container:
         print("Backend sandboxing: rlimit-only (--no-container passed) -- filesystem/network isolation from the sandboxed container path is NOT in effect.")
@@ -211,6 +212,7 @@ def main(argv: list[str] | None = None) -> int:
     p_gateway.add_argument("--alert-email-user", default=_env_default("BF_ALERT_EMAIL_USER"))
     p_gateway.add_argument("--alert-email-password", default=_env_default("BF_ALERT_EMAIL_PASSWORD"), help="Prefer BF_ALERT_EMAIL_PASSWORD over this flag -- avoids the password landing in shell history/process listings")
     p_gateway.add_argument("--alert-email-no-tls", action="store_true", default=_env_default("BF_ALERT_EMAIL_NO_TLS", "") not in ("", "0", "false", "False"))
+    p_gateway.add_argument("--gap-threshold", type=float, default=float(_env_default("BF_GAP_THRESHOLD_SECONDS", "60.0")), help="Seconds since the last logged event before a startup gap is marked and alerted (F-042) (BF_GAP_THRESHOLD_SECONDS)")
     p_gateway.set_defaults(func=cmd_gateway)
 
     p_console = sub.add_parser("console", help="Run the read-only web console (F-001/002/003/004/005/008), login required (F-040)")

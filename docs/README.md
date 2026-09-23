@@ -33,6 +33,7 @@ Apache 2.0. Self-hosted deployments are never capped by agent count — run it a
 ## Docs in this repo
 
 - [`status.md`](status.md) — current build status, the one place it's kept up to date
+- [`features.md`](features.md) — every feature, built or planned, with its ID, status, and what it does
 - [`CLI.md`](CLI.md) — every `bf-agent-viewer` command, its flags and env vars, and a complete first-run walkthrough
 - [`positioning.md`](positioning.md) — how this differs from existing agent identity/security tools, and why
 - [`market.md`](market.md) — the market this is built for

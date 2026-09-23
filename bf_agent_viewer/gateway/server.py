@@ -12,6 +12,7 @@ from fastmcp.server.providers.proxy import ProxyClient, ProxyProvider
 
 from bf_agent_viewer.alerts import AlertChannel
 from bf_agent_viewer.gateway.middleware import GatewayMiddleware
+from bf_agent_viewer.gateway.resilience import DEFAULT_GAP_THRESHOLD_SECONDS, check_and_log_gap
 from bf_agent_viewer.gateway.sandbox import (
     ContainerPolicy,
     SandboxPolicy,
@@ -32,8 +33,19 @@ def build_gateway(
     sandbox_policy: SandboxPolicy | None = None,
     container_policy: ContainerPolicy | None = None,
     prefer_container: bool = True,
+    gap_threshold_seconds: float = DEFAULT_GAP_THRESHOLD_SECONDS,
 ) -> tuple[FastMCP, GatewayMiddleware]:
     policy = sandbox_policy or SandboxPolicy()
+
+    # F-042: run before GatewayMiddleware(...) below picks up last_hash(conn)
+    # for itself, so a logged gap event becomes part of the chain the
+    # middleware sees, not a fork off to the side.
+    check_and_log_gap(
+        conn,
+        organization_id=organization_id,
+        alert_channel=alert_channel,
+        gap_threshold_seconds=gap_threshold_seconds,
+    )
 
     # build_backend_stdio_args (ISS-017/F-044) runs the backend inside a
     # locked-down container (real filesystem/network isolation) when

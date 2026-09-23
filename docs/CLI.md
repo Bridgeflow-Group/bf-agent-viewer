@@ -77,6 +77,7 @@ Runs the gateway: a persistent process that proxies to one backend MCP server, r
 | `--alert-email-user` | `BF_ALERT_EMAIL_USER` | none | Omit for an unauthenticated/allowlisted relay |
 | `--alert-email-password` | `BF_ALERT_EMAIL_PASSWORD` | none | Prefer the env var over the flag — avoids the password landing in shell history |
 | `--alert-email-no-tls` | `BF_ALERT_EMAIL_NO_TLS` | off | Skips STARTTLS |
+| `--gap-threshold` | `BF_GAP_THRESHOLD_SECONDS` | `60.0` | Seconds since the last logged event before a startup gap is marked and alerted (F-042) — see [`security.md`](security.md) |
 
 By default the gateway spawns the backend script inside a locked-down Docker container when Docker is reachable (real filesystem/network isolation), falling back to rlimit-only sandboxing with a logged warning when it isn't — never silently. `--no-container`/`BF_NO_CONTAINER=1` forces the fallback path deliberately; the Docker Compose deployment sets this (see the comment at the top of [`docker-compose.yml`](../docker-compose.yml) for why mounting the host's Docker socket into the gateway's own container isn't the answer).
 
