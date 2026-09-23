@@ -8,7 +8,37 @@ from __future__ import annotations
 import json
 import sqlite3
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
+
+# F-046: online/offline status indicator, computed at read time from
+# last_event_at recency -- not a stored/updated field. Default threshold
+# picked as a starting point for v0.1.0, not a settled answer: whether
+# this should vary by agent/autonomy tier rather than being one global
+# number is still open (see docs/../open-questions.docx OQ-025).
+DEFAULT_ONLINE_THRESHOLD_SECONDS = 300.0
+
+
+def _parse_occurred_at(value: str) -> datetime:
+    return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+
+
+def derive_online_status(
+    last_event_at: str | None,
+    *,
+    now: datetime | None = None,
+    threshold_seconds: float = DEFAULT_ONLINE_THRESHOLD_SECONDS,
+) -> str:
+    """Returns "online", "offline", or "never" -- "never" (no activity at
+    all) is kept distinct from "offline" (had activity once, but it's
+    stale now) since those mean different things to someone reading the
+    dashboard: a never-active agent may just not have run yet, not be
+    misbehaving."""
+    if not last_event_at:
+        return "never"
+    now = now or datetime.now(timezone.utc)
+    elapsed = (now - _parse_occurred_at(last_event_at)).total_seconds()
+    return "online" if elapsed < threshold_seconds else "offline"
 
 
 @dataclass(frozen=True)
@@ -21,6 +51,7 @@ class AgentRow:
     autonomy_tier: str | None
     last_event_at: str | None
     event_count: int
+    online_status: str
 
 
 @dataclass(frozen=True)
@@ -65,7 +96,12 @@ def has_any_agents(conn: sqlite3.Connection) -> bool:
     return row is not None
 
 
-def list_agents(conn: sqlite3.Connection, *, organization_id: str | None = None) -> list[AgentRow]:
+def list_agents(
+    conn: sqlite3.Connection,
+    *,
+    organization_id: str | None = None,
+    online_threshold_seconds: float = DEFAULT_ONLINE_THRESHOLD_SECONDS,
+) -> list[AgentRow]:
     where = "WHERE a.organization_id = ?" if organization_id else ""
     params = (organization_id,) if organization_id else ()
     rows = conn.execute(
@@ -81,10 +117,19 @@ def list_agents(conn: sqlite3.Connection, *, organization_id: str | None = None)
         """,
         params,
     ).fetchall()
-    return [AgentRow(*row) for row in rows]
+    now = datetime.now(timezone.utc)
+    return [
+        AgentRow(*row, online_status=derive_online_status(row[6], now=now, threshold_seconds=online_threshold_seconds))
+        for row in rows
+    ]
 
 
-def get_agent(conn: sqlite3.Connection, agent_id: str) -> AgentDetail | None:
+def get_agent(
+    conn: sqlite3.Connection,
+    agent_id: str,
+    *,
+    online_threshold_seconds: float = DEFAULT_ONLINE_THRESHOLD_SECONDS,
+) -> AgentDetail | None:
     row = conn.execute(
         """
         SELECT a.id, a.name, h.name, a.status, a.environment, a.autonomy_tier,
@@ -136,6 +181,7 @@ def get_agent(conn: sqlite3.Connection, agent_id: str) -> AgentDetail | None:
     return AgentDetail(
         id=aid, name=name, owner_name=owner_name, status=status, environment=environment,
         autonomy_tier=autonomy_tier, last_event_at=last_event_at, event_count=event_count,
+        online_status=derive_online_status(last_event_at, threshold_seconds=online_threshold_seconds),
         organization_id=organization_id, owner_id=owner_id, technical_owner_id=technical_owner_id,
         parent_agent_id=parent_agent_id, parent_agent_name=parent_agent_name,
         granted_scope=granted_scope,
@@ -218,6 +264,6 @@ def search(conn: sqlite3.Connection, query: str, *, limit: int = 25) -> dict[str
         (like, like, like, like, like, limit),
     ).fetchall()
     return {
-        "agents": [AgentRow(*row) for row in agent_rows],
+        "agents": [AgentRow(*row, online_status="never") for row in agent_rows],
         "events": [EventRow(*row) for row in event_rows],
     }

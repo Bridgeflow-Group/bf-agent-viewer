@@ -4,13 +4,14 @@
 <h1>Agents</h1>
 <table>
   <thead>
-    <tr><th>Name</th><th>Owner</th><th>Status</th><th>Environment</th><th>Autonomy</th><th>Last activity</th><th>Events</th></tr>
+    <tr><th>Name</th><th>Owner</th><th>Online</th><th>Status</th><th>Environment</th><th>Autonomy</th><th>Last activity</th><th>Events</th></tr>
   </thead>
   <tbody>
   {% for a in agents %}
     <tr>
       <td><a href="/agents/{{ a.id }}">{{ a.name }}</a></td>
       <td>{{ a.owner_name or "—" }}</td>
+      <td><span class="badge {{ a.online_status }}">{{ a.online_status }}</span></td>
       <td><span class="badge">{{ a.status }}</span></td>
       <td class="muted">{{ a.environment or "—" }}</td>
       <td class="muted">{{ a.autonomy_tier or "—" }}</td>

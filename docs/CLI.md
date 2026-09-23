@@ -94,6 +94,9 @@ Runs the read-only web console. Requires a valid session on every route — see 
 | `--host` | `BF_CONSOLE_HOST` | `127.0.0.1` | |
 | `--port` | `BF_CONSOLE_PORT` | `8942` | |
 | `--secure-cookies` | `BF_SECURE_COOKIES` | off | Marks session cookies `Secure` — only correct once served behind TLS |
+| `--stale-threshold` | `BF_STALE_THRESHOLD_SECONDS` | `300.0` | Seconds since an agent's last logged event before the dashboard shows it as offline rather than online (F-046) |
+
+Each agent's dashboard row and detail page show a computed online/offline badge — "online" if it's logged activity within `--stale-threshold`, "offline" if it has activity but it's older than that, or "never" if it's never logged anything at all. This is derived at read time from existing event data, not a separate liveness check — see [`features.md`](features.md) for the F-047 ping/health-check feature that's a live probe instead.
 
 ## `console-user create`
 

@@ -126,7 +126,10 @@ def cmd_console(args: argparse.Namespace) -> None:
     from bf_agent_viewer.console import build_console
 
     conn = connect(args.db, check_same_thread=False)
-    app = build_console(conn, organization_id=args.org, secure_cookies=args.secure_cookies)
+    app = build_console(
+        conn, organization_id=args.org, secure_cookies=args.secure_cookies,
+        online_threshold_seconds=args.stale_threshold,
+    )
     if not args.secure_cookies:
         print("Session cookies are NOT marked Secure -- fine for localhost/plain HTTP dev use; pass --secure-cookies once this is served behind TLS.")
     print(f"Console running at http://{args.host}:{args.port} -- requires login (F-040: password + TOTP). Create the first login with `bf-agent-viewer console-user create`.")
@@ -221,6 +224,7 @@ def main(argv: list[str] | None = None) -> int:
     p_console.add_argument("--host", default=_env_default("BF_CONSOLE_HOST", "127.0.0.1"))
     p_console.add_argument("--port", type=int, default=int(_env_default("BF_CONSOLE_PORT", "8942")))
     p_console.add_argument("--secure-cookies", action="store_true", default=_env_default("BF_SECURE_COOKIES", "") not in ("", "0", "false", "False"), help="Mark session cookies Secure; only correct when served behind TLS (BF_SECURE_COOKIES)")
+    p_console.add_argument("--stale-threshold", type=float, default=float(_env_default("BF_STALE_THRESHOLD_SECONDS", "300.0")), help="Seconds since an agent's last logged event before the dashboard shows it as offline rather than online (F-046) (BF_STALE_THRESHOLD_SECONDS)")
     p_console.set_defaults(func=cmd_console)
 
     p_console_user = sub.add_parser("console-user", help="Manage console login accounts (F-040)")

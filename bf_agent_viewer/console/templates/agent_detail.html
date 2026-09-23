@@ -5,6 +5,7 @@
 <h1>{{ agent.name }}</h1>
 <table>
   <tr><th>Owner</th><td>{{ agent.owner_name or "—" }}</td></tr>
+  <tr><th>Online</th><td><span class="badge {{ agent.online_status }}">{{ agent.online_status }}</span></td></tr>
   <tr><th>Status</th><td><span class="badge">{{ agent.status }}</span></td></tr>
   <tr><th>Environment</th><td>{{ agent.environment or "—" }}</td></tr>
   <tr><th>Autonomy tier</th><td>{{ agent.autonomy_tier or "—" }}</td></tr>

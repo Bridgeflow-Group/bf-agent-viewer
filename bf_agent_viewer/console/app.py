@@ -35,6 +35,7 @@ PENDING_COOKIE = "bf_console_pending"
 def build_console(
     conn: sqlite3.Connection, *, organization_id: str | None = None,
     secure_cookies: bool = False,
+    online_threshold_seconds: float = queries.DEFAULT_ONLINE_THRESHOLD_SECONDS,
 ) -> Starlette:
     """secure_cookies=False by default so the console works over plain
     HTTP on localhost during local/dev use (the common case per
@@ -72,7 +73,9 @@ def build_console(
             return templates.TemplateResponse(
                 request, "onboarding.html", {"current_user_name": user_name},
             )
-        agents = queries.list_agents(conn, organization_id=organization_id)
+        agents = queries.list_agents(
+            conn, organization_id=organization_id, online_threshold_seconds=online_threshold_seconds,
+        )
         recent_events = queries.list_events(conn, limit=25)
         return templates.TemplateResponse(
             request, "dashboard.html",
@@ -82,7 +85,7 @@ def build_console(
     @require_auth
     async def agent_detail(request: Request, human_id: str, user_name: str) -> HTMLResponse:
         agent_id = request.path_params["agent_id"]
-        agent = queries.get_agent(conn, agent_id)
+        agent = queries.get_agent(conn, agent_id, online_threshold_seconds=online_threshold_seconds)
         if agent is None:
             return templates.TemplateResponse(
                 request, "not_found.html",
