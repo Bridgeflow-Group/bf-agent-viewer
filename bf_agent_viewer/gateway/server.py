@@ -11,7 +11,7 @@ from fastmcp.client.transports import StdioTransport
 from fastmcp.server.providers.proxy import ProxyClient, ProxyProvider
 
 from bf_agent_viewer.alerts import AlertChannel
-from bf_agent_viewer.gateway.middleware import GatewayMiddleware
+from bf_agent_viewer.gateway.middleware import HEARTBEAT_TOOL_NAME, GatewayMiddleware
 from bf_agent_viewer.gateway.resilience import DEFAULT_GAP_THRESHOLD_SECONDS, check_and_log_gap
 from bf_agent_viewer.gateway.sandbox import (
     ContainerPolicy,
@@ -69,6 +69,23 @@ def build_gateway(
 
     gateway = FastMCP(name)
     gateway.add_provider(ProxyProvider(client_factory))
+
+    # F-047: a native tool, not proxied to the backend -- so it works even
+    # when the backend is slow, idle, or unreachable. Resolved via OQ-026:
+    # a real inbound "ping the agent" isn't possible against MCP's
+    # stateless per-request model (OQ-015) or agents that only ever
+    # connect outward, so this flips the direction -- the agent calls
+    # this on its own interval to signal it's alive, same auth path as
+    # any other tool call. GatewayMiddleware special-cases this tool name
+    # to skip scope/rate-limit checks and log it as its own event type
+    # (see middleware.py's _handle_heartbeat).
+    @gateway.tool(
+        name=HEARTBEAT_TOOL_NAME,
+        description="Liveness signal (F-047). Call on an interval to confirm this agent is still alive, independent of any real tool call.",
+    )
+    def _heartbeat() -> dict:
+        return {"status": "ok"}
+
     middleware = GatewayMiddleware(
         conn,
         organization_id=organization_id,

@@ -41,6 +41,16 @@ logger = logging.getLogger("bf_agent_viewer.gateway.middleware")
 FALLBACK_AGENT_ID = "agent-unregistered"
 TOKEN_HEADER = "x-bf-agent-token"
 
+# F-047: the reserved tool name an agent calls to send a liveness signal.
+# A native tool registered directly on the gateway's FastMCP instance
+# (see gateway/server.py), not proxied to the backend -- so it works even
+# when the backend itself is slow, idle, or has nothing to do right now.
+# Reserved: a backend that happens to define its own tool with this exact
+# name will collide with it; documented in CLI.md rather than solved with
+# collision detection, matching how this project states known constraints
+# plainly instead of engineering around every edge case up front.
+HEARTBEAT_TOOL_NAME = "bf_heartbeat"
+
 
 def _request_headers(context: MiddlewareContext) -> dict[str, str] | None:
     """Best-effort: only present for HTTP-transport connections. stdio
@@ -105,6 +115,16 @@ class GatewayMiddleware(Middleware):
         client_info = _client_info(context)
 
         agent_id = identity.agent_id if identity else FALLBACK_AGENT_ID
+
+        # F-047: a heartbeat isn't a real capability -- it doesn't touch
+        # the backend, doesn't need to be in anyone's granted_scope, and
+        # shouldn't compete with real work for the same rate-limit budget
+        # (the agent should never get rate-limited out of saying "I'm
+        # still alive," least of all when it's busy). Handled entirely
+        # outside the scope/rate-limit checks below.
+        if tool_name == HEARTBEAT_TOOL_NAME:
+            return await self._handle_heartbeat(context, call_next, agent_id)
+
         granted_scope = identity.granted_scope if identity else None
         action = "write" if tool_name in self.write_tools else "read"
 
@@ -187,4 +207,25 @@ class GatewayMiddleware(Middleware):
                 prev_hash=self.running_hash,
             )
             self.conn.commit()
+        return result
+
+    async def _handle_heartbeat(self, context: MiddlewareContext, call_next: CallNext, agent_id: str):
+        """F-047: logs a distinct agent.heartbeat event (not tool.called,
+        so it reads clearly in the activity history as a liveness pulse
+        rather than real work) -- but it's still a real event with a real
+        occurred_at, so it counts toward F-046's online/offline derivation
+        the same as any other activity. This is what actually closes the
+        gap F-046 alone leaves open: an agent that's alive but genuinely
+        idle (no tool calls to make right now) looks identical to a dead
+        one under F-046's activity-only view -- a heartbeat lets it keep
+        showing "online" without needing to fabricate real tool calls just
+        to stay visible."""
+        result = await call_next(context)
+        _, self.running_hash = log_event(
+            self.conn, organization_id=self.organization_id, agent_id=agent_id,
+            session_id=None, actor_human_id=None, event_type="agent.heartbeat",
+            action=None, tool_id=HEARTBEAT_TOOL_NAME, result="success", metadata={},
+            prev_hash=self.running_hash,
+        )
+        self.conn.commit()
         return result

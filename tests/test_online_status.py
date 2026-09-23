@@ -150,6 +150,30 @@ def test_agent_detail_shows_online_badge(tmp_path):
     assert 'badge online">online' in resp.text
 
 
+def test_heartbeat_alone_counts_as_activity_for_online_status(tmp_path):
+    """F-047's heartbeat (agent.heartbeat events) closes the exact gap
+    F-046 leaves open on its own: an agent with no real tool calls, only
+    heartbeats, must still show "online" -- the derivation counts any
+    logged event, not specifically tool.called."""
+    conn = reset(tmp_path / "hb_status.db")
+    conn.execute("INSERT INTO organizations (id, name) VALUES ('org-1', 'Org')")
+    conn.execute("INSERT INTO humans (id, organization_id, name) VALUES ('human-1', 'org-1', 'Owner')")
+    register_identity(
+        conn, organization_id="org-1", agent_id="agent-idle", agent_name="Idle Agent",
+        owner_human_id="human-1", subject="agent-idle", granted_scope=["get_weather"],
+    )
+    prev = last_hash(conn)
+    log_event(
+        conn, organization_id="org-1", agent_id="agent-idle", session_id=None,
+        actor_human_id=None, event_type="agent.heartbeat", action=None,
+        tool_id="bf_heartbeat", result="success", metadata={}, prev_hash=prev,
+    )
+    conn.commit()
+
+    agents = {a.id: a for a in queries.list_agents(conn, online_threshold_seconds=300.0)}
+    assert agents["agent-idle"].online_status == "online"
+
+
 def test_custom_threshold_changes_classification(tmp_path):
     """The agent-offline fixture's event is ~9999s stale -- with a huge
     threshold it should read as online instead, proving the threshold is

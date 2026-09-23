@@ -83,6 +83,8 @@ By default the gateway spawns the backend script inside a locked-down Docker con
 
 Neither `--alert-webhook` nor `--alert-email-to` is required — with neither set, alerts still fire, just to the gateway's own log (WARNING, or ERROR for `critical` severity) rather than a channel. Set both to fan an alert out to each independently; one failing to deliver doesn't stop the other from being tried. Every alert is persisted to the database regardless of delivery, so a webhook outage or SMTP failure doesn't mean the alert never happened.
 
+**Agent heartbeat (F-047).** Every gateway registers a reserved tool, `bf_heartbeat`, that an agent can call through its normal MCP connection to signal it's still alive — useful for an agent that goes quiet for a stretch with no real tool calls to make, so it doesn't start reading as offline (see the online/offline indicator under `console` below) just for being idle. It's not proxied to the backend, doesn't need to be in the caller's granted scope, and doesn't count against its rate limit. `bf_heartbeat` is a reserved name — avoid giving a backend tool of your own the same name.
+
 ## `console`
 
 Runs the read-only web console. Requires a valid session on every route — see `console-user create` below to provision the first login.
