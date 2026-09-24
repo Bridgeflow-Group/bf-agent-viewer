@@ -39,7 +39,24 @@ v0.1.0 is visibility only. It registers agents, captures their activity, and tra
 
 **Sandboxed backend spawning.** The gateway talks to each backend MCP server by spawning it as a child process — the pattern MCP's own official security guidance flags as a privilege-escalation path if the gateway's own auth is ever compromised (see [`standards.md`](standards.md)). Spawned backends get an explicit environment-variable allowlist (not the gateway's full environment — credentials, cloud metadata tokens, etc. stay withheld by default) and POSIX resource limits (file descriptors, process count, core dumps), applied inside the child itself before it runs. Where a container runtime is available, the backend runs inside a locked-down container instead — no network access, a read-only filesystem, no Linux capabilities — closing the remaining filesystem/network gap rather than leaving it to rlimits alone. Without a container runtime, the gateway falls back to the rlimit-only protection and logs that it did, rather than silently running with less isolation than configured.
 
-**Verifying your build.** Public releases are signed in CI via Sigstore/Cosign using GitHub Actions' own OIDC identity -- no keys for anyone to manage -- with signatures recorded in Sigstore's public transparency log (Rekor). That lets you verify you're running a genuine, unmodified build before trusting this as security infrastructure, rather than taking it on faith.
+**Verifying your build (F-039, built).** Every tagged release (`.github/workflows/release.yml`) builds the Python package and both container images, then signs all of it keylessly via Sigstore/Cosign using that CI run's own GitHub Actions OIDC identity -- no keys for anyone to manage, anywhere -- with signatures recorded in Sigstore's public transparency log (Rekor). That lets you verify you're running a genuine, unmodified build before trusting this as security infrastructure, rather than taking it on faith. Install [`cosign`](https://docs.sigstore.dev/system_config/installation/) first, then:
+
+```
+# Verify the Python package checksums (covers the sdist + wheel you pip install)
+cosign verify-blob \
+  --bundle checksums.txt.cosign.bundle \
+  --certificate-identity-regexp "^https://github.com/Bridgeflow-Group/bf-agent-viewer/" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  checksums.txt
+
+# Verify a container image, by tag or digest
+cosign verify \
+  --certificate-identity-regexp "^https://github.com/Bridgeflow-Group/bf-agent-viewer/" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  ghcr.io/bridgeflow-group/bf-agent-viewer:0.1.0
+```
+
+Both commands check that the release was signed by *this repo's* GitHub Actions workflow specifically (the `--certificate-identity-regexp`), not just by some Sigstore-issued certificate -- a signature from any other GitHub repo's CI would fail that check. `checksums.txt` and `checksums.txt.cosign.bundle` ship as release assets alongside the wheel and sdist.
 
 ## What v0.1.0 explicitly does not do
 
