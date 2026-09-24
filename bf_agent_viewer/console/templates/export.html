@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Export — BF Agent Viewer{% endblock %}
+{% block content %}
+<h1>Compliance export</h1>
+<p class="muted">Download this agent's (or your whole organization's) event history as CSV — for your own audit or regulatory record-keeping. Every filter below is optional; leave a field blank to include everything.</p>
+
+{% if error %}
+<p style="color: #ff9d9d;">{{ error }}</p>
+{% endif %}
+
+<form method="get" action="/export">
+  <table>
+    <tr>
+      <th style="width: 12rem;"><label for="agent_id">Agent</label></th>
+      <td>
+        <select name="agent_id" id="agent_id">
+          <option value="">All agents</option>
+          {% for a in agents %}
+          <option value="{{ a.id }}" {% if agent_id == a.id %}selected{% endif %}>{{ a.name }}</option>
+          {% endfor %}
+        </select>
+      </td>
+    </tr>
+    <tr>
+      <th><label for="owner_id">Owner</label></th>
+      <td>
+        <select name="owner_id" id="owner_id">
+          <option value="">All owners</option>
+          {% for h_id, h_name in owner_rows %}
+          <option value="{{ h_id }}" {% if owner_id == h_id %}selected{% endif %}>{{ h_name }}</option>
+          {% endfor %}
+        </select>
+      </td>
+    </tr>
+    <tr>
+      <th><label for="start">From</label></th>
+      <td><input type="date" name="start" id="start" value="{{ start or '' }}"></td>
+    </tr>
+    <tr>
+      <th><label for="end">Through</label></th>
+      <td><input type="date" name="end" id="end" value="{{ end or '' }}"></td>
+    </tr>
+  </table>
+  <p>
+    <button type="submit" name="download" value="1" style="padding: 0.5rem 1rem; border-radius: 4px; border: none; background: #2b6cb0; color: white; cursor: pointer;">Download CSV</button>
+  </p>
+</form>
+{% endblock %}

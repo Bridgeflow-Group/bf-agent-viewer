@@ -73,6 +73,7 @@ EXPECTED_DATA_FILES = [
     "bf_agent_viewer/console/templates/enroll.html",
     "bf_agent_viewer/console/templates/verify.html",
     "bf_agent_viewer/console/templates/not_found.html",
+    "bf_agent_viewer/console/templates/export.html",
 ]
 
 

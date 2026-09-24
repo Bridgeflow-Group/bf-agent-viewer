@@ -127,6 +127,26 @@ Provisions (or resets) a console login for an existing human, and starts TOTP en
 | `--human` | — | yes | Must already exist and have an email on file |
 | `--password` | — | no | Omit to be prompted (recommended — avoids the password landing in shell history) |
 
+## `export events`
+
+The scriptable half of the customer-facing compliance export (F-034): a filtered CSV export of event history, for satisfying your own regulatory record-keeping obligations (e.g. EU AI Act Art. 12) without contacting us. The console's own `/export` page (behind login, point-and-click, with agent/owner dropdowns) calls the same underlying export — use whichever fits: the CLI for automation, the console for a one-off pull.
+
+| Flag | Env var | Required | Notes |
+| --- | --- | --- | --- |
+| `--db` | `BF_DB` | yes | |
+| `--org` | `BF_ORG` | no | Restrict the export to one organization; omit to export across all organizations in this database |
+| `--agent-id` | — | no | Restrict to one agent |
+| `--owner` | — | no | Restrict to agents owned by this `human create`'s `--id` |
+| `--start` | — | no | Inclusive lower bound — `YYYY-MM-DD` or the full `YYYY-MM-DDTHH:MM:SSZ` timestamp shape |
+| `--end` | — | no | Inclusive upper bound — a bare date covers through the end of that day |
+| `--out` | — | no | Write CSV to this file; omit to print to stdout (pipe it, or redirect it, as you like) |
+
+Every filter is optional and additive — with none set, this exports the organization's (or, with `--org` also omitted, the whole database's) complete event history. Each row includes the event's `content_hash`, so an auditor can independently re-verify the tamper-evident chain (see [`security.md`](security.md)) rather than taking the export on faith. Output format/columns are CSV only for v0.1.0 — a formatted/PDF report is a possible later Paid enhancement, not built now.
+
+```
+bf-agent-viewer export events --db bf.db --org org-1 --start 2026-09-01 --end 2026-09-30 --out september.csv
+```
+
 ## A complete first run
 
 ```

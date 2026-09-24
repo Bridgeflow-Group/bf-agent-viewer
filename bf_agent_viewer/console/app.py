@@ -25,6 +25,7 @@ from starlette.routing import Route
 from starlette.templating import Jinja2Templates
 
 from bf_agent_viewer.console import auth, queries
+from bf_agent_viewer.reports import InvalidDateBoundError, export_events_csv
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 
@@ -120,6 +121,56 @@ def build_console(
         results = queries.search(conn, q, organization_id=organization_id) if q else {"agents": [], "events": []}
         return templates.TemplateResponse(
             request, "search.html", {"q": q, "results": results, "current_user_name": user_name},
+        )
+
+    @require_auth
+    async def export_view(request: Request, human_id: str, user_name: str) -> Response:
+        """F-034/T-016: customer-facing compliance export. A GET-only page
+        (no write path, matching v0.1.0's console-is-read-only scope) --
+        filling in the filters and downloading is the only action, so a
+        plain query-string form works and stays bookmarkable/scriptable,
+        no separate POST handler needed."""
+        params = request.query_params
+        agent_id = params.get("agent_id") or None
+        owner_id = params.get("owner_id") or None
+        start = params.get("start") or None
+        end = params.get("end") or None
+
+        agents = queries.list_agents(conn, organization_id=organization_id, include_sub_agents=True)
+        owner_rows = conn.execute(
+            "SELECT id, name FROM humans" + (" WHERE organization_id = ?" if organization_id else ""),
+            (organization_id,) if organization_id else (),
+        ).fetchall()
+
+        if params.get("download") == "1":
+            try:
+                csv_text = export_events_csv(
+                    conn, organization_id=organization_id, agent_id=agent_id,
+                    owner_human_id=owner_id, start=start, end=end,
+                )
+            except InvalidDateBoundError as e:
+                return templates.TemplateResponse(
+                    request, "export.html",
+                    {
+                        "agents": agents, "owner_rows": owner_rows, "error": str(e),
+                        "agent_id": agent_id, "owner_id": owner_id, "start": start, "end": end,
+                        "current_user_name": user_name,
+                    },
+                    status_code=400,
+                )
+            filename = f"bf-agent-viewer-events-{start or 'all'}-to-{end or 'all'}.csv"
+            return Response(
+                csv_text, media_type="text/csv",
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            )
+
+        return templates.TemplateResponse(
+            request, "export.html",
+            {
+                "agents": agents, "owner_rows": owner_rows, "error": None,
+                "agent_id": agent_id, "owner_id": owner_id, "start": start, "end": end,
+                "current_user_name": user_name,
+            },
         )
 
     async def logout(request: Request) -> Response:
@@ -223,6 +274,7 @@ def build_console(
         Route("/agents/{agent_id}", agent_detail),
         Route("/events/{event_id}", event_detail),
         Route("/search", search_view),
+        Route("/export", export_view),
         Route("/login", login_get, methods=["GET"]),
         Route("/login", login_post, methods=["POST"]),
         Route("/login/verify", verify_get, methods=["GET"]),

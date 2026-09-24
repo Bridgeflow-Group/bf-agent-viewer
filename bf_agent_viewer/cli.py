@@ -15,6 +15,7 @@ import sys
 
 from bf_agent_viewer.db import connect
 from bf_agent_viewer.identity import claim_discovered_agent, issue_token, register_identity
+from bf_agent_viewer.reports import InvalidDateBoundError, export_events_csv
 
 
 def _env_default(var: str, fallback: str | None = None) -> str | None:
@@ -181,6 +182,29 @@ def cmd_console_user_create(args: argparse.Namespace) -> None:
     print(f"URI:    {result.otpauth_uri}")
 
 
+def cmd_export_events(args: argparse.Namespace) -> None:
+    """F-034/T-016: the scriptable half of the compliance export -- the
+    console's own `/export` page (auth-required, point-and-click) uses the
+    same underlying export_events_csv(), so a customer's compliance
+    function can either click a button or automate the pull, without two
+    separate implementations to keep in sync."""
+    conn = connect(args.db)
+    try:
+        csv_text = export_events_csv(
+            conn, organization_id=args.org, agent_id=args.agent_id,
+            owner_human_id=args.owner, start=args.start, end=args.end,
+        )
+    except InvalidDateBoundError as e:
+        print(f"error: {e}")
+        raise SystemExit(1)
+    if args.out:
+        with open(args.out, "w", newline="") as f:
+            f.write(csv_text)
+        print(f"wrote {args.out}")
+    else:
+        sys.stdout.write(csv_text)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="bf-agent-viewer")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -260,6 +284,18 @@ def main(argv: list[str] | None = None) -> int:
     p_cu_create.add_argument("--human", required=True, help="humans.id of the person this login belongs to")
     p_cu_create.add_argument("--password", default=None, help="Omit to be prompted (recommended -- avoids the password landing in shell history)")
     p_cu_create.set_defaults(func=cmd_console_user_create)
+
+    p_export = sub.add_parser("export", help="Compliance export (F-034): filtered event-history reports")
+    export_sub = p_export.add_subparsers(dest="export_command", required=True)
+    p_export_events = export_sub.add_parser("events", help="Export event history as CSV, filtered by agent/owner/date range")
+    p_export_events.add_argument("--db", default=_env_default("BF_DB"), required=_env_default("BF_DB") is None)
+    p_export_events.add_argument("--org", default=_env_default("BF_ORG"), help="Restrict the export to one organization_id; omit to export across all organizations in this database")
+    p_export_events.add_argument("--agent-id", default=None, help="Restrict to one agent")
+    p_export_events.add_argument("--owner", default=None, help="Restrict to agents owned by this human_id")
+    p_export_events.add_argument("--start", default=None, help="Inclusive lower bound: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ")
+    p_export_events.add_argument("--end", default=None, help="Inclusive upper bound: YYYY-MM-DD (through end of that day) or YYYY-MM-DDTHH:MM:SSZ")
+    p_export_events.add_argument("--out", default=None, help="Write CSV to this file instead of stdout")
+    p_export_events.set_defaults(func=cmd_export_events)
 
     args = parser.parse_args(argv)
     args.func(args)
