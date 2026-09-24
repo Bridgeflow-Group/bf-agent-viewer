@@ -234,6 +234,56 @@ class GatewayMiddleware(Middleware):
             self.conn.commit()
         return result
 
+    def resolve_token(self, token: str | None) -> Identity | None:
+        """Same lookup `_resolve` does for an MCP connection's header, but
+        callable directly from something that isn't a MiddlewareContext --
+        the OTel SDK ingestion route (gateway/otel_ingest.py, F-024/T-019)
+        reads its bearer token from a plain Starlette Request instead."""
+        return self.token_registry.get(token) if token else None
+
+    def log_otel_event(
+        self,
+        *,
+        agent_id: str,
+        tool_id: str | None,
+        action: str | None,
+        result: str,
+        metadata: dict[str, Any],
+        event_type: str = "tool.called",
+    ) -> str:
+        """Write one event reported through the OTel SDK ingestion path
+        (F-024/T-019) into the same tamper-evident chain the MCP gateway
+        path writes to -- one running_hash, one writer, regardless of
+        which instrumentation path produced the event, so the chain
+        stays a single coherent history rather than forking per path.
+
+        Deliberately NOT async and does no I/O of its own between reading
+        self.running_hash and reassigning it (matches on_call_tool's own
+        discipline, see that method's docstring reasoning) -- this is
+        what keeps concurrent calls into this method safe on a single
+        asyncio event loop without needing an explicit lock: nothing here
+        yields control between the read and the write. The caller (the
+        route handler in otel_ingest.py) is responsible for doing its own
+        I/O (reading the request body, resolving the token) *before*
+        calling this, not after.
+
+        Always logged as event_type="tool.called", source="otel_sdk" --
+        unlike the MCP gateway path, this method never blocks or rejects
+        the underlying tool call: by the time this is invoked, the real
+        call already happened out-of-band (the SDK reports after the
+        fact, it doesn't proxy). A scope violation or rate-limit signal
+        from this path is recorded as an alert-worthy observation, never
+        an enforcement action -- see otel_ingest.py for that logic.
+        """
+        event_id, self.running_hash = log_event(
+            self.conn, organization_id=self.organization_id, agent_id=agent_id,
+            session_id=None, actor_human_id=None, event_type=event_type,
+            action=action, tool_id=tool_id, result=result, source="otel_sdk",
+            metadata=metadata, prev_hash=self.running_hash,
+        )
+        self.conn.commit()
+        return event_id
+
     async def _handle_heartbeat(self, context: MiddlewareContext, call_next: CallNext, agent_id: str):
         """F-047: logs a distinct agent.heartbeat event (not tool.called,
         so it reads clearly in the activity history as a liveness pulse

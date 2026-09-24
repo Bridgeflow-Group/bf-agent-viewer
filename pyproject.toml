@@ -8,16 +8,26 @@ license = { text = "Apache-2.0" }
 dependencies = [
     "fastmcp>=4.0.5",
     "mcp>=2.2",
+    # F-024/T-019: the gateway's OTel-SDK ingestion route
+    # (gateway/otel_ingest.py) uses Starlette's Request/JSONResponse
+    # directly, the same as FastMCP's own custom_route mechanism it's
+    # built on -- already a real transitive dependency of fastmcp (this
+    # is exactly what console's own pin, below, already flagged: don't
+    # rely silently on a transitive dep staying present). Pinned here in
+    # the base install, not just the console extra, since this route is
+    # part of the plain `bf-agent-viewer gateway` path, no extras
+    # required.
+    "starlette>=1.0",
 ]
 
 [project.optional-dependencies]
 # Only needed for `bf-agent-viewer console` -- the gateway/CLI register
-# path has no web-framework dependency at all. Deliberately no new
-# top-level deps beyond what fastmcp already pulls in transitively
-# (confirmed before choosing this stack); pinned here explicitly rather
-# than relying silently on that staying true.
+# path has no web-framework dependency at all beyond starlette itself
+# (now a base dependency, see above). Deliberately no new top-level deps
+# beyond what fastmcp already pulls in transitively (confirmed before
+# choosing this stack); pinned here explicitly rather than relying
+# silently on that staying true.
 console = [
-    "starlette>=1.0",
     "jinja2>=3.1",
     "uvicorn>=0.34",
     "pyotp>=2.9",  # F-040: TOTP MFA, mandatory for console login

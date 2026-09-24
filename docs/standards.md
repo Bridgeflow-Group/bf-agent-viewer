@@ -34,6 +34,10 @@ Most of the list (goal hijack, tool misuse, unexpected code execution, memory/co
 - **WIMSE (Workload Identity in Multi-System Environments, IETF).** Aims to unify SPIFFE, OAuth, and JWT into one workload-identity foundation. **Watching** — still draft-stage, not broadly adopted.
 - **SPIFFE-compatible workload identity.** Used for the platform's own zero-trust identity model (see `regulatory.md`, NIST AI RMF Agentic Profile mapping). **Adopted.**
 
+## Instrumentation & observability
+
+- **OpenTelemetry GenAI semantic conventions (`gen_ai.*` attribute names).** The fallback SDK path's wire format (F-024, gateway/otel_ingest.py's `POST /v1/otel/events`) reuses the standard's own attribute names (`gen_ai.operation.name`, `gen_ai.tool.name`, `gen_ai.tool.call.id`, `gen_ai.tool.call.arguments`, `gen_ai.agent.name`, `error.type`) rather than a proprietary event shape, so a team that already runs an OTel collector recognizes the fields immediately. **Adopted, partially** — a small, honest subset targeted at exactly what F-024's fallback path needs (a completed tool call's identity, arguments, and outcome), not a full OTLP/protobuf exporter; nothing here would need to change shape if a real OTLP export path is added later, since the attribute names are the same either way.
+
 ## Build & supply chain
 
 - **Sigstore / Cosign, keyless signing via CI OIDC identity.** Public releases signed in CI (GitHub Actions), signatures recorded in Sigstore's public transparency log (Rekor) — lets anyone verify they're running a genuine, unmodified build. **Adopted** — F-039, v0.1.0.

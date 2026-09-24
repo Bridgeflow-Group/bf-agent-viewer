@@ -71,6 +71,36 @@ Like `register`, prints the issued token once — set it as the agent's `X-BF-Ag
 
 An agent that's discovered but never claimed stays visible on the dashboard with no owner — it's never blocked from calling tools, since v0.1.0 is visibility-first, not enforcement-first (see [`security.md`](security.md)).
 
+## Reporting events from the OTel SDK (fallback path, F-024)
+
+Not a `bf-agent-viewer` CLI command — this is a small Python client (`bf_agent_viewer.sdk`) an agent process imports directly, for the fallback instrumentation path: agents that never connect through the MCP gateway above at all, e.g. one calling third-party REST APIs directly with no MCP layer in between (see [`how-it-works.md`](how-it-works.md) section 3). It uses the exact same `X-BF-Agent-Token` a `register`/`claim` call already printed you — no separate credential to manage.
+
+```python
+from bf_agent_viewer.sdk import BFAgentViewerClient
+
+client = BFAgentViewerClient(
+    gateway_url="http://localhost:8941",  # the running `gateway`'s own host:port
+    token="bfav_...",                     # from `register` or `claim`, above
+    agent_name="billing-agent",           # optional; used only for passive discovery if the token isn't recognized
+)
+
+# Times the block and reports success/error automatically:
+with client.trace_tool_call("send_invoice", arguments={"customer": "acme"}):
+    send_invoice(customer="acme")
+
+# Or report a call that already finished, on your own terms:
+client.record_tool_call(
+    "send_invoice", arguments={"customer": "acme"},
+    result="success", duration_ms=142.3,
+)
+```
+
+Dependency-free (stdlib `urllib` only) so importing it never pulls in an HTTP library an agent doesn't already have. Reporting failures (gateway unreachable, event rejected) never raise by default — pass `raise_on_error=True` to `BFAgentViewerClient` if you want them to.
+
+What this path is and isn't: it's lower-fidelity than the MCP gateway on purpose. The gateway sees every call because it sits in the request path; the SDK only sees what an agent chooses to report, after the fact. It also can't block anything — by the time an event reaches the gateway's ingestion endpoint, the real tool call already happened somewhere this platform was never in the path for. A call reported outside the identity's `granted_scope`, or a burst of reports exceeding this endpoint's own rate limit, is still logged (or, for the rate limit, rejected purely to protect the event pipeline itself) and — for a scope violation — raises an alert, but neither one prevents the call itself. See [`security.md`](security.md).
+
+Wire format is a small, honest subset of the OpenTelemetry GenAI semantic convention's `gen_ai.*` attribute names (`POST /v1/otel/events` on the gateway) rather than a proprietary shape — see [`standards.md`](standards.md).
+
 ## `gateway`
 
 Runs the gateway: a persistent process that proxies to one backend MCP server, resolving identity per request from the presented bearer token, enforcing delegation scope, rate-limiting per agent, and logging every call as a tamper-evident event. See [`security.md`](security.md) for what it does and doesn't protect against.

@@ -12,6 +12,7 @@ from fastmcp.server.providers.proxy import ProxyClient, ProxyProvider
 
 from bf_agent_viewer.alerts import AlertChannel
 from bf_agent_viewer.gateway.middleware import HEARTBEAT_TOOL_NAME, GatewayMiddleware
+from bf_agent_viewer.gateway.otel_ingest import register_otel_ingest_route
 from bf_agent_viewer.gateway.resilience import DEFAULT_GAP_THRESHOLD_SECONDS, check_and_log_gap
 from bf_agent_viewer.gateway.sandbox import (
     ContainerPolicy,
@@ -94,4 +95,12 @@ def build_gateway(
         alert_channel=alert_channel,
     )
     gateway.add_middleware(middleware)
+
+    # F-024/T-019: the OTel-SDK fallback ingestion route, for agents that
+    # never connect through the MCP proxy above at all. Registered after
+    # `middleware` exists -- the route reads identity/rate-limit/alert
+    # state from it directly (see otel_ingest.py) rather than duplicating
+    # any of that setup.
+    register_otel_ingest_route(gateway, middleware)
+
     return gateway, middleware
