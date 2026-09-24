@@ -14,7 +14,7 @@ import os
 import sys
 
 from bf_agent_viewer.db import connect
-from bf_agent_viewer.identity import issue_token, register_identity
+from bf_agent_viewer.identity import claim_discovered_agent, issue_token, register_identity
 
 
 def _env_default(var: str, fallback: str | None = None) -> str | None:
@@ -62,6 +62,23 @@ def cmd_register(args: argparse.Namespace) -> None:
     print(f"registered {identity.agent_id} (identity {identity.identity_id})")
     print(f"token: {token}")
     print("Set this as the X-BF-Agent-Token header on the agent's gateway connections.")
+
+
+def cmd_claim(args: argparse.Namespace) -> None:
+    conn = connect(args.db)
+    identity = claim_discovered_agent(
+        conn,
+        organization_id=args.org,
+        agent_id=args.agent_id,
+        owner_human_id=args.owner,
+        granted_scope=args.scope,
+        agent_name=args.name,
+    )
+    token = issue_token(conn, agent_id=identity.agent_id)
+    print(f"claimed {identity.agent_id} (identity {identity.identity_id})")
+    print(f"token: {token}")
+    print("Set this as the X-BF-Agent-Token header on the agent's gateway connections.")
+    print("Its prior unauthenticated traffic was never trusted (visible, not granted any scope), so there's nothing to revoke.")
 
 
 def _build_alert_channel(args: argparse.Namespace):
@@ -196,6 +213,15 @@ def main(argv: list[str] | None = None) -> int:
     p_register.add_argument("--scope", nargs="+", required=True, help="tool names this identity may call")
     p_register.add_argument("--parent-identity", default=None)
     p_register.set_defaults(func=cmd_register)
+
+    p_claim = sub.add_parser("claim", help="Claim a passively-discovered agent (F-027/T-012): assigns a real owner and issues a real identity + credential, replacing its unowned/unclaimed state")
+    p_claim.add_argument("--db", default=_env_default("BF_DB"), required=_env_default("BF_DB") is None)
+    p_claim.add_argument("--org", default=_env_default("BF_ORG"), required=_env_default("BF_ORG") is None)
+    p_claim.add_argument("--agent-id", required=True, help="id of the discovered agent row -- see the dashboard or `agents` table for what an unregistered caller's traffic landed under")
+    p_claim.add_argument("--owner", required=True, help="human_id of the accountable owner")
+    p_claim.add_argument("--scope", nargs="+", required=True, help="tool names this identity may call")
+    p_claim.add_argument("--name", default=None, help="Rename the agent at claim time; defaults to keeping the name it was discovered under")
+    p_claim.set_defaults(func=cmd_claim)
 
     p_gateway = sub.add_parser("gateway", help="Run the gateway: proxies to a backend MCP server with identity resolution, scope enforcement, rate limiting, tamper-evident logging, and sandboxed backend spawning")
     p_gateway.add_argument("--db", default=_env_default("BF_DB"), required=_env_default("BF_DB") is None)

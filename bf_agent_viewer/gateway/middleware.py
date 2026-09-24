@@ -33,12 +33,11 @@ from fastmcp.server.middleware import CallNext, Middleware, MiddlewareContext
 
 from bf_agent_viewer.alerts import AlertChannel, LoggingAlertChannel, fire_alert
 from bf_agent_viewer.events import last_hash, log_event
-from bf_agent_viewer.identity import Identity, load_token_registry
+from bf_agent_viewer.identity import Identity, discover_agent, load_token_registry
 from bf_agent_viewer.ratelimit import TokenBucketLimiter
 
 logger = logging.getLogger("bf_agent_viewer.gateway.middleware")
 
-FALLBACK_AGENT_ID = "agent-unregistered"
 TOKEN_HEADER = "x-bf-agent-token"
 
 # F-047: the reserved tool name an agent calls to send a liveness signal.
@@ -114,7 +113,28 @@ class GatewayMiddleware(Middleware):
         identity, token = self._resolve(context)
         client_info = _client_info(context)
 
-        agent_id = identity.agent_id if identity else FALLBACK_AGENT_ID
+        if identity:
+            agent_id = identity.agent_id
+        else:
+            # T-012 (F-027, passive discovery): an unrecognized caller no
+            # longer just gets its traffic stamped with a fixed sentinel
+            # id that nothing else in the product can see -- it gets a
+            # real, visible-but-unowned `agents` row, so it shows up on
+            # the dashboard the moment it's first seen. Still not trusted
+            # (granted_scope stays None below, same as before) -- this is
+            # about visibility, not authorization. See identity/discovery.py.
+            agent_id, first_sighting = discover_agent(
+                self.conn, organization_id=self.organization_id, client_info=client_info,
+            )
+            if first_sighting:
+                _, self.running_hash = log_event(
+                    self.conn, organization_id=self.organization_id, agent_id=agent_id,
+                    session_id=None, actor_human_id=None, event_type="agent.discovered",
+                    action=None, tool_id=None, result="success",
+                    metadata={"client_info_asserted": str(client_info) if client_info else None},
+                    prev_hash=self.running_hash,
+                )
+                self.conn.commit()
 
         # F-047: a heartbeat isn't a real capability -- it doesn't touch
         # the backend, doesn't need to be in anyone's granted_scope, and

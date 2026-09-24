@@ -54,6 +54,23 @@ Registers an agent identity and issues its bearer token in one step. Run again w
 
 Prints the issued token once. There's no separate command to retrieve it later — set it as the agent's `X-BF-Agent-Token` header when you get it, or re-run `register` to issue a fresh one (the old token isn't revoked automatically; see [`versions.md`](versions.md) on the v0.2.0 credential broker for real revocation).
 
+## `claim`
+
+The other half of dual-path agent registration (F-027): claims an agent that the gateway discovered passively (an unrecognized caller — no valid bearer token — that showed up in traffic and got a real, visible-but-unowned row instead of being logged invisibly). Check the dashboard or `agents` table for the id it landed under, then claim it here to assign a real owner and issue it a real, scoped credential.
+
+| Flag | Env var | Required | Notes |
+| --- | --- | --- | --- |
+| `--db` | `BF_DB` | yes | |
+| `--org` | `BF_ORG` | yes | |
+| `--agent-id` | — | yes | The id of the discovered agent row — see the dashboard, or `agents` table `status = 'unclaimed'` |
+| `--owner` | — | yes | `human create`'s `--id` |
+| `--scope` | — | yes | One or more tool names, space-separated |
+| `--name` | — | no | Rename the agent at claim time; defaults to keeping the name it was discovered under |
+
+Like `register`, prints the issued token once — set it as the agent's `X-BF-Agent-Token` header. Claiming refuses to run against anything not currently in the discovered/unclaimed state (already claimed, or explicitly registered) rather than silently re-owning it — register a fresh identity with `register` instead if that's what you actually want.
+
+An agent that's discovered but never claimed stays visible on the dashboard with no owner — it's never blocked from calling tools, since v0.1.0 is visibility-first, not enforcement-first (see [`security.md`](security.md)).
+
 ## `gateway`
 
 Runs the gateway: a persistent process that proxies to one backend MCP server, resolving identity per request from the presented bearer token, enforcing delegation scope, rate-limiting per agent, and logging every call as a tamper-evident event. See [`security.md`](security.md) for what it does and doesn't protect against.

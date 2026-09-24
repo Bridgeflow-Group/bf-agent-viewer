@@ -39,6 +39,17 @@ include = ["bf_agent_viewer*"]
 
 [tool.setuptools.package-data]
 "bf_agent_viewer.console" = ["templates/*.html"]
+# schema.sql/migrations.sql are read at runtime by db/connection.py
+# (Path(__file__).with_name(...)), not imported as Python -- setuptools
+# doesn't package non-.py files by default, so without this an installed
+# `pip install .` (this is exactly what docker/app/Dockerfile runs) has
+# no schema.sql on disk at all: connect() raises FileNotFoundError on the
+# very first command anyone runs against a fresh database. Caught by
+# actually installing into a clean venv and running a real command
+# against it (T-013) -- not something `pytest` from a source checkout
+# would ever catch, since the repo's own schema.sql is always right there
+# on disk regardless of what packaging declares.
+"bf_agent_viewer.db" = ["*.sql"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

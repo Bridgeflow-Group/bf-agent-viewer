@@ -18,7 +18,12 @@ CREATE TABLE agents (
     id                  TEXT PRIMARY KEY,
     organization_id     TEXT NOT NULL REFERENCES organizations(id),
     name                TEXT NOT NULL,
-    owner_id            TEXT NOT NULL REFERENCES humans(id),
+    -- Nullable (T-012/F-027): a passively-discovered agent gets a real row
+    -- here the moment it's first seen, before anyone has assigned it an
+    -- owner -- owner_id is NULL and status stays 'unclaimed' until a human
+    -- claims it (see identity/discovery.py). status's default already
+    -- anticipated this state; owner_id just had to stop requiring one.
+    owner_id            TEXT REFERENCES humans(id),
     technical_owner_id  TEXT REFERENCES humans(id),
     environment         TEXT,
     status              TEXT NOT NULL DEFAULT 'unclaimed',

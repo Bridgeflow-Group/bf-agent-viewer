@@ -16,6 +16,48 @@ _SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 _MIGRATIONS_PATH = Path(__file__).with_name("migrations.sql")
 
 
+def _migrate_agents_owner_nullable(conn: sqlite3.Connection) -> None:
+    """T-012 (F-027): passive discovery needs to write a real `agents` row
+    for an unrecognized caller before anyone has assigned it an owner --
+    schema.sql's original `owner_id TEXT NOT NULL` made that impossible on
+    a database created before this change. SQLite has no ALTER COLUMN to
+    drop a NOT NULL constraint, so this rebuilds the table the standard
+    SQLite way (new table in the post-migration shape, copy the rows,
+    swap it in) -- but only when the table is still in the old shape, so
+    this is a no-op on every process start after the first. Expressed in
+    Python rather than added to migrations.sql: that file's
+    CREATE-TABLE/INDEX-IF-NOT-EXISTS pattern can add a new table, but
+    can't express 'loosen a constraint on a table that already exists'."""
+    columns = conn.execute("PRAGMA table_info(agents)").fetchall()
+    owner_col = next((c for c in columns if c[1] == "owner_id"), None)
+    if owner_col is None or owner_col[3] == 0:
+        # Already nullable (or the table doesn't exist yet, which
+        # schema.sql is about to create correctly) -- nothing to do.
+        return
+    conn.executescript(
+        """
+        CREATE TABLE agents_new (
+            id                  TEXT PRIMARY KEY,
+            organization_id     TEXT NOT NULL REFERENCES organizations(id),
+            name                TEXT NOT NULL,
+            owner_id            TEXT REFERENCES humans(id),
+            technical_owner_id  TEXT REFERENCES humans(id),
+            environment         TEXT,
+            status              TEXT NOT NULL DEFAULT 'unclaimed',
+            autonomy_tier       TEXT,
+            created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at          TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        INSERT INTO agents_new SELECT * FROM agents;
+        DROP TABLE agents;
+        ALTER TABLE agents_new RENAME TO agents;
+        CREATE INDEX idx_agents_owner ON agents(owner_id);
+        CREATE INDEX idx_agents_status ON agents(status);
+        """
+    )
+    conn.commit()
+
+
 def connect(path: str | os.PathLike, *, check_same_thread: bool = True) -> sqlite3.Connection:
     """Connect to the database at `path`, creating and initializing it from
     schema.sql only if it doesn't already exist. Safe to call on every
@@ -52,6 +94,7 @@ def connect(path: str | os.PathLike, *, check_same_thread: bool = True) -> sqlit
     with open(_MIGRATIONS_PATH) as f:
         conn.executescript(f.read())
     conn.commit()
+    _migrate_agents_owner_nullable(conn)
     return conn
 
 
