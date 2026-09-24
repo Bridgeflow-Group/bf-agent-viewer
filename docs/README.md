@@ -43,7 +43,7 @@ Apache 2.0. Self-hosted deployments are never capped by agent count — run it a
 - [`security.md`](security.md) — the platform's own security architecture and what it does and doesn't do yet
 - [`standards.md`](standards.md) — technical and security standards this design follows, tracks, or has deliberately not adopted, and why
 - [`regulatory.md`](regulatory.md) — the legal and compliance landscape (EU AI Act and similar)
-- [`research.md`](research.md) — the running research log: validation results, design decisions, and findings from building against real traffic
+- [`research.md`](research.md) (continued in [`research-part-2.md`](research-part-2.md)) — the running research log: validation results, design decisions, and findings from building against real traffic
 
 ## Get involved
 

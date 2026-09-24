@@ -66,3 +66,23 @@ CREATE TABLE IF NOT EXISTS alerts (
 );
 CREATE INDEX IF NOT EXISTS idx_alerts_org_time ON alerts(organization_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_alerts_agent ON alerts(agent_id);
+
+-- retention_checkpoints (F-019/T-017): configurable log retention. Every
+-- retention prune run (bf_agent_viewer/retention/prune.py) writes one row
+-- here, before it deletes anything -- the content_hash of the last event
+-- row it removed. events/log.py's verify_chain() (and last_hash()) start
+-- their replay of the tamper-evident hash chain from the latest
+-- checkpoint's chain_tip_hash instead of always assuming an untouched
+-- history back to "GENESIS", so both writing new events and verifying
+-- the chain still work correctly once old rows are gone. Append-only and
+-- kept in full (not just the latest row) as its own small audit trail of
+-- what's been pruned and when.
+CREATE TABLE IF NOT EXISTS retention_checkpoints (
+    id                          TEXT PRIMARY KEY,
+    pruned_through_event_id     TEXT NOT NULL,
+    pruned_through_occurred_at  TEXT NOT NULL,
+    chain_tip_hash              TEXT NOT NULL,
+    events_pruned                INTEGER NOT NULL,
+    created_at                  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_retention_checkpoints_created ON retention_checkpoints(created_at);

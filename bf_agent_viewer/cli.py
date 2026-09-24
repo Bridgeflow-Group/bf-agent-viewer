@@ -16,6 +16,7 @@ import sys
 from bf_agent_viewer.db import connect
 from bf_agent_viewer.identity import claim_discovered_agent, issue_token, register_identity
 from bf_agent_viewer.reports import InvalidDateBoundError, export_events_csv
+from bf_agent_viewer.retention import DEFAULT_RETENTION_DAYS, prune_events
 
 
 def _env_default(var: str, fallback: str | None = None) -> str | None:
@@ -205,6 +206,25 @@ def cmd_export_events(args: argparse.Namespace) -> None:
         sys.stdout.write(csv_text)
 
 
+def cmd_retention_prune(args: argparse.Namespace) -> None:
+    """F-019/T-017: the prune job half of configurable log retention --
+    deletes events older than --retention-days, recording a chain
+    checkpoint in the same transaction so the tamper-evident hash chain
+    stays verifiable afterward (see bf_agent_viewer/retention/prune.py).
+    Intended to be run on a schedule (e.g. a daily cron entry, or the
+    Compose deployment's own scheduler) -- v0.1.0 doesn't run this
+    automatically on its own; see CLI.md."""
+    conn = connect(args.db)
+    result = prune_events(conn, retention_days=args.retention_days)
+    if result.events_pruned == 0:
+        print(f"nothing to prune -- no events older than {result.cutoff} "
+              f"(retention {args.retention_days:g} days).")
+    else:
+        print(f"pruned {result.events_pruned} event(s) older than {result.cutoff} "
+              f"(retention {args.retention_days:g} days).")
+        print(f"chain checkpoint recorded: {result.chain_tip_hash}")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="bf-agent-viewer")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -296,6 +316,19 @@ def main(argv: list[str] | None = None) -> int:
     p_export_events.add_argument("--end", default=None, help="Inclusive upper bound: YYYY-MM-DD (through end of that day) or YYYY-MM-DDTHH:MM:SSZ")
     p_export_events.add_argument("--out", default=None, help="Write CSV to this file instead of stdout")
     p_export_events.set_defaults(func=cmd_export_events)
+
+    p_retention = sub.add_parser("retention", help="Configurable log retention (F-019): prune event history older than the retention window")
+    retention_sub = p_retention.add_subparsers(dest="retention_command", required=True)
+    p_retention_prune = retention_sub.add_parser("prune", help="Delete events older than the retention window, preserving tamper-evident chain verifiability")
+    p_retention_prune.add_argument("--db", default=_env_default("BF_DB"), required=_env_default("BF_DB") is None)
+    p_retention_prune.add_argument(
+        "--retention-days", type=float,
+        default=float(_env_default("BF_RETENTION_DAYS", str(DEFAULT_RETENTION_DAYS))),
+        help=f"Delete events older than this many days (default {DEFAULT_RETENTION_DAYS:g}, "
+             f"~6 months -- a compliance-safe default per EU AI Act Art. 19/26 minimum "
+             f"retention, REQ-002) (BF_RETENTION_DAYS)",
+    )
+    p_retention_prune.set_defaults(func=cmd_retention_prune)
 
     args = parser.parse_args(argv)
     args.func(args)

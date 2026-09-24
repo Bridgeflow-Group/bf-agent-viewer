@@ -29,3 +29,10 @@ Download it and run it today, free, no sales call, no agent-count cap (see licen
 ## 3. The honest caveat
 
 "Open source" alone is not a differentiator anymore -- plenty of security tooling is open source. The differentiator is the combination: open source, zero enterprise sales motion, and visibility-first sequencing, aimed at a buyer the incumbents structurally can't serve. And that moat has a shelf life -- the research doc's own competitive-risk finding (section 1) is that a funded vendor could move downmarket with a free tier. This positioning holds only as long as that hasn't happened.
+
+## 4. Landscape updates (addenda, most recent first)
+
+**2026-09-24.** Two developments from an industry-alignment research pass (see `research-part-2.md`), neither requiring a positioning change yet, both worth tracking against the shelf-life risk in section 3:
+
+- **Astrix Security was acquired by Cisco in May 2026.** One of the three named incumbents above is now backed by a platform vendor's distribution and resources rather than operating as an independent company -- exactly the kind of consolidation that could eventually fund a downmarket move, though nothing found this pass indicates Cisco/Astrix has actually done that yet. Astrix's own positioning (discovery/governance, not runtime enforcement) is unchanged; only its backing is.
+- **Pomerium is a new named entrant worth tracking, not yet a fourth incumbent to position against.** An open-core identity-aware gateway with MCP-specific tool-level authorization, positioned closer to this platform's own "no vendor lock-in" self-hosted angle than NewCore/Astrix/Aembit are -- but Pomerium's buyer already runs a Zero Trust program (it extends one), which is a different buyer than the "no security function at all" target this platform is built for. Section 2's "built for a buyer without a security function" distinction likely still holds against Pomerium specifically, but this wasn't tested directly and shouldn't be assumed indefinitely.

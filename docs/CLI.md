@@ -147,6 +147,21 @@ Every filter is optional and additive — with none set, this exports the organi
 bf-agent-viewer export events --db bf.db --org org-1 --start 2026-09-01 --end 2026-09-30 --out september.csv
 ```
 
+## `retention prune`
+
+The prune job half of configurable log retention (F-019): deletes event rows older than the retention window, for satisfying your own regulatory record-keeping obligations (e.g. EU AI Act Art. 19/26 minimum retention) without the event store growing forever. Not run automatically — run it yourself on whatever schedule fits (a daily cron entry is the simplest option for a self-hosted install).
+
+| Flag | Env var | Default | Notes |
+| --- | --- | --- | --- |
+| `--db` | `BF_DB` | — (required) | |
+| `--retention-days` | `BF_RETENTION_DAYS` | `180` | Delete events older than this many days — the default is a compliance-safe ~6 months |
+
+Safe to run repeatedly (a run with nothing yet past the window is a no-op) and safe to run against a database that's still receiving live traffic from a gateway process. Pruning only ever removes a contiguous prefix of the event history — the oldest rows first — never an arbitrary filtered set: the event store's tamper-evident hash chain (see [`security.md`](security.md)) chains each row to the one before it, so a prune run records a checkpoint of the last row it removes before deleting anything, and chain verification (and the next event logged) both pick up from that checkpoint afterward rather than assuming an untouched history. This is why there's no `--agent-id`/`--org` filter here the way `export events` has one above — retention prunes the whole chain's oldest rows, not a filtered subset of them.
+
+```
+bf-agent-viewer retention prune --db bf.db --retention-days 180
+```
+
 ## A complete first run
 
 ```
