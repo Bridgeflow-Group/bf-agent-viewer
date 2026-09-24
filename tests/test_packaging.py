@@ -85,6 +85,26 @@ def built_wheel(tmp_path_factory):
     venv.create(venv_dir, with_pip=True)
     venv_python = venv_dir / "bin" / "python"
 
+    # `--no-build-isolation` below means pip builds using *this* venv's own
+    # environment rather than fetching an isolated build backend -- so
+    # setuptools.build_meta (pyproject.toml's build-system.build-backend)
+    # has to actually be importable here first. venv.create(with_pip=True)
+    # does not guarantee that: on newer Python/pip (confirmed against
+    # Python 3.12 in real GitHub Actions CI, 2026-09-24 -- the first real
+    # run of ci.yml), a fresh venv's ensurepip step installs pip alone, not
+    # setuptools/wheel alongside it, unlike this dev sandbox's own default
+    # venv behavior, which is why this passed locally and failed in CI.
+    # Installing them explicitly makes the fixture's own environment
+    # assumption correct instead of accidental.
+    install_result = subprocess.run(
+        [str(venv_python), "-m", "pip", "install", "--no-cache-dir", "setuptools", "wheel"],
+        capture_output=True, text=True, timeout=120,
+    )
+    assert install_result.returncode == 0, (
+        f"could not install setuptools/wheel into the build venv:\n"
+        f"{install_result.stdout}\n{install_result.stderr}"
+    )
+
     # A clean copy of the source tree, not REPO_ROOT itself -- see _IGNORE's
     # comment above for why building in place isn't trustworthy.
     build_context = tmp_path_factory.mktemp("packaging_src") / "bf-agent-viewer"
