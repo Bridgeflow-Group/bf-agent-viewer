@@ -1,0 +1,102 @@
+# T-018/F-039's prerequisite half, and the first CI pipeline in this repo
+# at all: runs the real test suite against every push and pull request, so
+# a broken change is caught before it ever reaches a release tag. See
+# release.yml for the signed-release workflow this gates by example (that
+# workflow re-runs this same test step itself before it builds or signs
+# anything) and docs/CLI.md / docs/status.md for what these commands do
+# outside of CI.
+#
+# GitHub-hosted ubuntu-latest runners ship Docker preinstalled and
+# reachable, unlike this project's own dev sandbox (see docs/status.md's
+# "Blocked" section, T-013) -- so the container-sandbox tests that skip
+# locally when no Docker daemon is running should actually execute for
+# real here. Nothing special needed to make that happen; noted so a
+# passing run here is read as stronger evidence than a local one, not
+# assumed equivalent.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Matches pyproject.toml's requires-python = ">=3.10".
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install the package with console + dev extras
+        run: pip install -e ".[console,dev]"
+
+      - name: Run the test suite
+        run: pytest -v
+
+      - name: Report Docker availability
+        # Informational only -- doesn't fail the job. Lets a reader of the
+        # run log see directly whether the container-sandbox tests above
+        # ran for real or fell back to their documented skip path, rather
+        # than having to infer it from the test summary alone.
+        if: always()
+        run: |
+          if docker info > /dev/null 2>&1; then
+            echo "Docker daemon reachable -- container-sandbox tests ran for real, not skipped."
+          else
+            echo "Docker daemon NOT reachable on this runner -- container-sandbox tests fell back to their documented skip path."
+          fi
+
+  build-check:
+    name: Verify the package actually installs from a clean wheel
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install build tooling
+        run: pip install --upgrade build
+
+      - name: Build the wheel from a clean checkout
+        # Mirrors tests/test_packaging.py's own from-a-clean-copy build
+        # (that test already covers this at the unit level against a
+        # temp copy of the tree) -- this step is the same check against
+        # what actually gets checked out in CI, on a genuinely clean
+        # runner rather than a dev sandbox that might have stray
+        # build/*.egg-info left over from local iteration.
+        run: python -m build --wheel
+
+      - name: Install the built wheel into a fresh venv and smoke-test it
+        run: |
+          python -m venv /tmp/wheel-venv
+          /tmp/wheel-venv/bin/pip install dist/*.whl
+          /tmp/wheel-venv/bin/bf-agent-viewer --help
+          /tmp/wheel-venv/bin/python -c "
+          from bf_agent_viewer.db import reset
+          conn = reset('/tmp/ci-smoke.db')
+          conn.execute(\"INSERT INTO organizations (id, name) VALUES ('org-1','Org')\")
+          conn.commit()
+          print('schema.sql/migrations.sql present and a real connect()+insert worked from the installed wheel')
+          "

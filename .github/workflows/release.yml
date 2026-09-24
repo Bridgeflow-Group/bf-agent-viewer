@@ -1,0 +1,259 @@
+# Signed, verifiable releases (F-039/T-018): builds the Python package and
+# both container images, signs everything keylessly via Sigstore/Cosign
+# using this workflow's own GitHub Actions OIDC identity, and publishes
+# those signatures to Sigstore's public transparency log (Rekor) -- so
+# anyone running this project as security infrastructure can verify a
+# release is the genuine, unmodified output of this repo's own CI, not
+# something injected afterward, without this project managing or
+# distributing any signing keys at all. See docs/security.md
+# ("Verifying your build") and docs/standards.md for why this exists.
+#
+# Fires on a version tag push (v0.1.0, v0.1.1, ...), matching the scheme
+# docs/versions.md already uses. Re-runs the same test suite ci.yml runs
+# on every push as its own first job -- a signed, broken release is worse
+# than no release, so this never signs or publishes anything without a
+# green test run in the same workflow invocation.
+#
+# Not yet verified end-to-end against a real tag push (see docs/status.md,
+# T-013/T-018) -- this project's own dev sandbox has no path to trigger or
+# observe a real GitHub Actions run, and its container-registry egress is
+# blocked the same way T-013 already documents for local `docker build`.
+# What IS verified locally: this file's YAML is well-formed, and the
+# package-build/checksum steps run for real outside of Docker (see
+# docs/research-part-2.md's 2026-09-24 entry for the exact commands run
+# and their output). The action versions pinned below (checkout@v4,
+# setup-python@v5, upload/download-artifact@v4, the docker/* actions,
+# sigstore/cosign-installer@v3, softprops/action-gh-release@v2) were NOT
+# checked against GitHub's registry -- this sandbox's egress blocks
+# github.com/api.github.com too (see below) -- so that check is still
+# owed alongside the first real run. Push a version tag and watch the
+# Actions tab.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (only for a manual re-run against an existing tag; normally this fires from the tag push itself)"
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  IMAGE_APP: ghcr.io/${{ github.repository }}
+  IMAGE_SANDBOX: ghcr.io/${{ github.repository }}-backend-sandbox
+
+jobs:
+  test:
+    name: Test before releasing anything
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e ".[console,dev]"
+      - run: pytest -v
+
+  build-package:
+    name: Build the Python sdist + wheel
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Derive the release version from the tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - run: pip install --upgrade build
+
+      - name: Build sdist + wheel
+        run: python -m build
+
+      - name: Generate checksums
+        # A single checksums.txt gets signed as one blob (see the sign job
+        # below) rather than signing the wheel and sdist separately --
+        # standard pattern (same one Python's own release process and
+        # most Sigstore quickstarts use), and it's what verify-locally
+        # instructions in docs/security.md tell a customer to check
+        # first.
+        run: |
+          cd dist
+          sha256sum * > checksums.txt
+          cat checksums.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-package
+          path: |
+            dist/*
+          if-no-files-found: error
+
+  build-image-app:
+    name: Build + push the app image (gateway/console)
+    needs: [test, build-package]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/app/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_APP }}:${{ needs.build-package.outputs.version }}
+            ${{ env.IMAGE_APP }}:latest
+          # sha256 digest output below is what actually gets signed, not
+          # the mutable tag -- a tag can be moved or overwritten after the
+          # fact, the digest can't. See the sign job.
+
+  build-image-sandbox:
+    name: Build + push the backend-sandbox image
+    needs: [test, build-package]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: docker/backend-sandbox
+          file: docker/backend-sandbox/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_SANDBOX }}:${{ needs.build-package.outputs.version }}
+            ${{ env.IMAGE_SANDBOX }}:latest
+          # Pre-built convenience option only -- gateway/sandbox.py's
+          # ContainerPolicy default still expects a locally-built
+          # bf-agent-viewer-backend-sandbox:latest tag and this publish
+          # doesn't change that default. This just means an operator can
+          # `docker pull` and re-tag a signed, known-good image instead of
+          # building it themselves, if they'd rather.
+
+  sign:
+    name: Sign everything keylessly (Sigstore/Cosign, OIDC)
+    needs: [build-package, build-image-app, build-image-sandbox]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # required to mint the OIDC token cosign uses for keyless signing
+      packages: write # required to attach image signatures back to the GHCR registry
+      contents: read
+    steps:
+      - uses: sigstore/cosign-installer@v3
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: python-package
+          path: dist
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sign the package checksums (blob signature)
+        # --yes skips cosign's interactive confirmation prompt (this is a
+        # non-interactive CI run). No key material anywhere in this step
+        # or this repo -- cosign exchanges this job's own GitHub Actions
+        # OIDC token for a short-lived signing certificate from Sigstore's
+        # Fulcio CA at sign time, and the resulting signature (plus that
+        # certificate, plus the Rekor inclusion proof) is bundled into one
+        # file a verifier checks offline. See docs/security.md for the
+        # matching `cosign verify-blob` command a customer runs.
+        run: |
+          cosign sign-blob --yes \
+            --bundle dist/checksums.txt.cosign.bundle \
+            dist/checksums.txt
+
+      - name: Sign the app image (by digest, not by mutable tag)
+        run: |
+          cosign sign --yes \
+            "${{ env.IMAGE_APP }}@${{ needs.build-image-app.outputs.digest }}"
+
+      - name: Sign the backend-sandbox image (by digest, not by mutable tag)
+        run: |
+          cosign sign --yes \
+            "${{ env.IMAGE_SANDBOX }}@${{ needs.build-image-sandbox.outputs.digest }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cosign-bundle
+          path: dist/checksums.txt.cosign.bundle
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish the GitHub Release
+    needs: [build-package, sign]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # required to create the GitHub Release and upload its assets
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: python-package
+          path: dist
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: cosign-bundle
+          path: dist
+
+      - name: Create the GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          # Draft, not auto-published -- a human confirms the release
+          # notes and hits publish, same "real work, not a fast-path
+          # shortcut" standard as everything else in this repo; the build
+          # and signing above are the part that must not be manual (keys
+          # nobody should be typing by hand), publishing the notes isn't.
+          draft: true
+          generate_release_notes: true
+          files: |
+            dist/*.whl
+            dist/*.tar.gz
+            dist/checksums.txt
+            dist/checksums.txt.cosign.bundle
