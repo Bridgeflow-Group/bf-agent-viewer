@@ -99,7 +99,12 @@ class GatewayMiddleware(Middleware):
         self.alert_channel = alert_channel or LoggingAlertChannel()
 
         self.running_hash = last_hash(conn)
-        self.token_registry = load_token_registry(conn)
+        # T-014 (org isolation audit): filtered to this gateway's own
+        # organization_id -- previously loaded every organization's active
+        # tokens into one shared dict, so a bearer token issued for a
+        # different organization's agent would authenticate successfully
+        # here too, as long as both shared the same database file.
+        self.token_registry = load_token_registry(conn, organization_id=organization_id)
 
     def _resolve(self, context: MiddlewareContext) -> tuple[Identity | None, str | None]:
         headers = _request_headers(context)

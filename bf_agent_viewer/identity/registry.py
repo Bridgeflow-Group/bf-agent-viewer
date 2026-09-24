@@ -85,17 +85,46 @@ def register_identity(
     subset of its parent's.
     """
     if parent_identity_id is not None:
+        # T-014 (org isolation audit): join through to agents.organization_id
+        # rather than a bare id lookup -- a parent_identity_id is not itself
+        # organization-scoped, so without this a sub-agent registration
+        # under one organization could inherit (and be scope-checked
+        # against) a parent identity that belongs to a *different*
+        # organization, as long as the caller could guess/enumerate its id.
         parent = conn.execute(
-            "SELECT granted_scope FROM agent_identities WHERE id = ?", (parent_identity_id,)
+            """SELECT ai.granted_scope FROM agent_identities ai
+               JOIN agents ag ON ag.id = ai.agent_id
+               WHERE ai.id = ? AND ag.organization_id = ?""",
+            (parent_identity_id, organization_id),
         ).fetchone()
         if parent is None:
-            raise ValueError(f"parent_identity_id {parent_identity_id!r} does not exist")
+            raise ValueError(
+                f"parent_identity_id {parent_identity_id!r} does not exist in "
+                f"organization {organization_id!r}"
+            )
         parent_scope = set(json.loads(parent[0])) if parent[0] else None
         if parent_scope is not None and not set(granted_scope) <= parent_scope:
             raise ValueError(
                 f"granted_scope {granted_scope} is not a subset of parent's scope "
                 f"{sorted(parent_scope)} -- delegation must only narrow authority, never widen it"
             )
+
+    # T-014 (org isolation audit): owner_human_id must belong to the same
+    # organization as the agent being registered. Without this, an agent
+    # created under organization A could be assigned an owner_id
+    # referencing a human row that actually belongs to organization B --
+    # accountability (the whole point of owner_id -- see security.md's
+    # "every event traces back through that chain to an accountable human
+    # owner") would then point at the wrong organization's records.
+    owner_row = conn.execute(
+        "SELECT 1 FROM humans WHERE id = ? AND organization_id = ?",
+        (owner_human_id, organization_id),
+    ).fetchone()
+    if owner_row is None:
+        raise ValueError(
+            f"owner_human_id {owner_human_id!r} does not exist in organization "
+            f"{organization_id!r} -- create the human there first with `bf-agent-viewer human create`"
+        )
 
     now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     identity_id = identity_id or f"identity-{agent_id}"
@@ -118,16 +147,37 @@ def register_identity(
     return Identity(identity_id, agent_id, parent_identity_id, frozenset(granted_scope))
 
 
-def load_registry(conn: sqlite3.Connection) -> dict[str, Identity]:
+def load_registry(
+    conn: sqlite3.Connection, *, organization_id: str | None = None,
+) -> dict[str, Identity]:
     """Load all registered identities, keyed by `subject` (the clientInfo.name
     a connection must assert to resolve to this identity). Kept as a
     secondary, best-effort resolution path -- see module docstring for why
     it's only safe for a single-connection-per-process transport (stdio),
     not the persistent multi-connection HTTP gateway. Call once per
-    gateway process at startup, not per request."""
-    rows = conn.execute(
-        "SELECT subject, id, agent_id, parent_identity_id, granted_scope FROM agent_identities"
-    ).fetchall()
+    gateway process at startup, not per request.
+
+    organization_id (T-014, org isolation audit): filters to identities
+    whose agent belongs to this organization. Without it, two
+    organizations sharing one database file and happening to register the
+    same `subject` string would collide -- the second load would silently
+    win the dict key, and a client asserting that name could resolve to
+    the wrong organization's identity. Optional for backward
+    compatibility (some tests build a registry from a single-org fixture
+    and don't care); every real caller in this codebase now passes it.
+    """
+    if organization_id is not None:
+        rows = conn.execute(
+            """SELECT ai.subject, ai.id, ai.agent_id, ai.parent_identity_id, ai.granted_scope
+               FROM agent_identities ai
+               JOIN agents ag ON ag.id = ai.agent_id
+               WHERE ag.organization_id = ?""",
+            (organization_id,),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT subject, id, agent_id, parent_identity_id, granted_scope FROM agent_identities"
+        ).fetchall()
     registry: dict[str, Identity] = {}
     for subject, identity_id, agent_id, parent_identity_id, granted_scope in rows:
         scope = frozenset(json.loads(granted_scope)) if granted_scope else None
@@ -135,20 +185,46 @@ def load_registry(conn: sqlite3.Connection) -> dict[str, Identity]:
     return registry
 
 
-def load_token_registry(conn: sqlite3.Connection) -> dict[str, Identity]:
+def load_token_registry(
+    conn: sqlite3.Connection, *, organization_id: str | None = None,
+) -> dict[str, Identity]:
     """Load all active bearer tokens, keyed by token value, resolved to the
     issuing agent's identity. This is the primary, transport-safe
     resolution path -- checked fresh per request by the gateway, no
     connection-scoped caching involved. Call once per gateway process at
     startup; a token issued or revoked after that won't be picked up until
     the process restarts or this is called again (acceptable for v0.1.0;
-    live invalidation is a v0.2.0+ broker concern)."""
-    rows = conn.execute(
-        """SELECT c.id, i.id, i.agent_id, i.parent_identity_id, i.granted_scope
-           FROM credentials c
-           JOIN agent_identities i ON i.agent_id = c.agent_id
-           WHERE c.status = 'active'"""
-    ).fetchall()
+    live invalidation is a v0.2.0+ broker concern).
+
+    organization_id (T-014, org isolation audit): the most severe gap this
+    audit found. This is the gateway's actual authentication boundary --
+    without this filter, a bearer token issued for agent X in
+    organization A would resolve successfully against a gateway process
+    configured for organization B, as long as both organizations' data
+    live in the same SQLite file. A gateway is always started with one
+    `--org`/BF_ORG (see cli.py), so this is now filtered to match it:
+    a token from another organization simply isn't in the loaded registry
+    at all, not merely displayed differently. Optional for backward
+    compatibility (a caller resolving across all orgs deliberately, if
+    one ever legitimately needs to); every real caller in this codebase
+    now passes it.
+    """
+    if organization_id is not None:
+        rows = conn.execute(
+            """SELECT c.id, i.id, i.agent_id, i.parent_identity_id, i.granted_scope
+               FROM credentials c
+               JOIN agent_identities i ON i.agent_id = c.agent_id
+               JOIN agents ag ON ag.id = i.agent_id
+               WHERE c.status = 'active' AND ag.organization_id = ?""",
+            (organization_id,),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """SELECT c.id, i.id, i.agent_id, i.parent_identity_id, i.granted_scope
+               FROM credentials c
+               JOIN agent_identities i ON i.agent_id = c.agent_id
+               WHERE c.status = 'active'"""
+        ).fetchall()
     registry: dict[str, Identity] = {}
     for token, identity_id, agent_id, parent_identity_id, granted_scope in rows:
         scope = frozenset(json.loads(granted_scope)) if granted_scope else None

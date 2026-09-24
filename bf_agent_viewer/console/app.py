@@ -76,7 +76,7 @@ def build_console(
         agents = queries.list_agents(
             conn, organization_id=organization_id, online_threshold_seconds=online_threshold_seconds,
         )
-        recent_events = queries.list_events(conn, limit=25)
+        recent_events = queries.list_events(conn, organization_id=organization_id, limit=25)
         return templates.TemplateResponse(
             request, "dashboard.html",
             {"agents": agents, "recent_events": recent_events, "current_user_name": user_name},
@@ -85,14 +85,16 @@ def build_console(
     @require_auth
     async def agent_detail(request: Request, human_id: str, user_name: str) -> HTMLResponse:
         agent_id = request.path_params["agent_id"]
-        agent = queries.get_agent(conn, agent_id, online_threshold_seconds=online_threshold_seconds)
+        agent = queries.get_agent(
+            conn, agent_id, organization_id=organization_id, online_threshold_seconds=online_threshold_seconds,
+        )
         if agent is None:
             return templates.TemplateResponse(
                 request, "not_found.html",
                 {"kind": "agent", "id": agent_id, "current_user_name": user_name},
                 status_code=404,
             )
-        events = queries.list_events(conn, agent_id=agent_id, limit=100)
+        events = queries.list_events(conn, agent_id=agent_id, organization_id=organization_id, limit=100)
         return templates.TemplateResponse(
             request, "agent_detail.html",
             {"agent": agent, "events": events, "current_user_name": user_name},
@@ -101,7 +103,7 @@ def build_console(
     @require_auth
     async def event_detail(request: Request, human_id: str, user_name: str) -> HTMLResponse:
         event_id = request.path_params["event_id"]
-        event = queries.get_event(conn, event_id)
+        event = queries.get_event(conn, event_id, organization_id=organization_id)
         if event is None:
             return templates.TemplateResponse(
                 request, "not_found.html",
@@ -115,7 +117,7 @@ def build_console(
     @require_auth
     async def search_view(request: Request, human_id: str, user_name: str) -> HTMLResponse:
         q = request.query_params.get("q", "").strip()
-        results = queries.search(conn, q) if q else {"agents": [], "events": []}
+        results = queries.search(conn, q, organization_id=organization_id) if q else {"agents": [], "events": []}
         return templates.TemplateResponse(
             request, "search.html", {"q": q, "results": results, "current_user_name": user_name},
         )

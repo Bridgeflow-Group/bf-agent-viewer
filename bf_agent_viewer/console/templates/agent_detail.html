@@ -10,13 +10,35 @@
   <tr><th>Environment</th><td>{{ agent.environment or "—" }}</td></tr>
   <tr><th>Autonomy tier</th><td>{{ agent.autonomy_tier or "—" }}</td></tr>
   <tr><th>Delegated from</th>
-    <td>{% if agent.parent_agent_id %}<a href="/agents/{{ agent.parent_agent_id }}">{{ agent.parent_agent_name or agent.parent_agent_id }}</a>{% else %}— (top-level){% endif %}</td>
+    <td>
+      {% if agent.ancestor_chain %}
+        {% for anc_id, anc_name in agent.ancestor_chain %}<a href="/agents/{{ anc_id }}">{{ anc_name or anc_id }}</a> &rsaquo; {% endfor %}{{ agent.name }}
+      {% else %}
+        — (top-level)
+      {% endif %}
+    </td>
   </tr>
   <tr><th>Granted scope</th>
     <td>{% if agent.granted_scope %}{% for s in agent.granted_scope %}<code>{{ s }}</code> {% endfor %}{% else %}—{% endif %}</td>
   </tr>
   <tr><th>Total events</th><td>{{ agent.event_count }}</td></tr>
 </table>
+
+{% if agent.sub_agents %}
+<h2 style="margin-top: 2rem;">Sub-agents</h2>
+<p class="muted">Delegated from this agent. Nested here by default rather than listed as peer rows on the dashboard (F-028) — each still has its own full identity, event history, and detail page.</p>
+<ul class="delegation-tree">
+{% for node in agent.sub_agents recursive %}
+  <li>
+    <a href="/agents/{{ node.id }}">{{ node.name }}</a>
+    <span class="badge {{ node.online_status }}">{{ node.online_status }}</span>
+    <span class="badge">{{ node.status }}</span>
+    {% if node.autonomy_tier %}<span class="muted">{{ node.autonomy_tier }}</span>{% endif %}
+    {% if node.children %}<ul>{{ loop(node.children) }}</ul>{% endif %}
+  </li>
+{% endfor %}
+</ul>
+{% endif %}
 
 <h2 style="margin-top: 2rem;">Tool &amp; resource activity</h2>
 {% if events %}

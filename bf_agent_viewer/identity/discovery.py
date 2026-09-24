@@ -137,6 +137,20 @@ def claim_discovered_agent(
             "fresh --agent-id for a brand-new identity instead"
         )
 
+    # T-014 (org isolation audit): same owner/organization consistency
+    # check as register_identity -- a claim must not be able to hand a
+    # discovered agent's ownership to a human belonging to a different
+    # organization than the agent itself.
+    owner_row = conn.execute(
+        "SELECT 1 FROM humans WHERE id = ? AND organization_id = ?",
+        (owner_human_id, organization_id),
+    ).fetchone()
+    if owner_row is None:
+        raise ValueError(
+            f"owner_human_id {owner_human_id!r} does not exist in organization "
+            f"{organization_id!r} -- create the human there first with `bf-agent-viewer human create`"
+        )
+
     now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     conn.execute(
         """UPDATE agents SET owner_id = ?, status = 'active', autonomy_tier = ?, name = ?,
