@@ -222,7 +222,15 @@ async def test_gateway_configured_for_one_org_rejects_a_token_issued_for_another
     must NOT resolve against it -- before the T-014 fix, load_token_registry
     loaded every organization's active tokens into one shared dict, so
     this token would have authenticated successfully and been treated as
-    a legitimate, if unscoped-looking, caller."""
+    a legitimate, if unscoped-looking, caller.
+
+    Updated for F-016/T-024: a presented-but-unrecognized token (which is
+    what an out-of-org token is, from this gateway's point of view) is now
+    rejected outright rather than falling through to unscoped passive
+    discovery -- see middleware.py's on_call_tool. That's a stricter
+    outcome than this test originally asserted, and a good one: an
+    org-b token being treated as an anonymous-but-UNSCOPED caller in
+    org-a would have been its own soft cross-org privilege leak."""
     conn = reset(tmp_path / "org_gw1.db")
     _seed_two_orgs(conn)
 
@@ -246,8 +254,9 @@ async def test_gateway_configured_for_one_org_rejects_a_token_issued_for_another
         transport = StreamableHttpTransport(
             "http://127.0.0.1:8970/mcp", headers={"x-bf-agent-token": token_b},
         )
-        async with Client(transport) as client:
-            await client.call_tool("get_weather", {"city": "Lima"})
+        with pytest.raises(Exception):  # noqa: BLE001 -- FastMCP wraps the PermissionError as a client-side error
+            async with Client(transport) as client:
+                await client.call_tool("get_weather", {"city": "Lima"})
     finally:
         server_task.cancel()
         try:
@@ -255,14 +264,25 @@ async def test_gateway_configured_for_one_org_rejects_a_token_issued_for_another
         except (asyncio.CancelledError, Exception):
             pass
 
-    # The org-b token was not recognized: the call fell through to the
-    # passive-discovery path (an unresolved/unscoped caller), not to
-    # agent-b's real, org-b-scoped identity.
+    # The org-b token was not recognized in org-a's gateway: the call was
+    # rejected outright (F-016/T-024), never reaching agent-b's real,
+    # org-b-scoped identity, and never logged as a successful call under
+    # any identity.
     rows = conn.execute(
         "SELECT agent_id FROM events WHERE event_type = 'tool.called'"
     ).fetchall()
     called_agent_ids = {r[0] for r in rows}
     assert "agent-b" not in called_agent_ids
+    assert called_agent_ids == set()
+
+    rejected_rows = conn.execute(
+        "SELECT agent_id FROM events WHERE event_type = 'tool.rejected_unrecognized_token'"
+    ).fetchall()
+    assert len(rejected_rows) == 1
+    # Logged under a fresh org-a discovery, never agent-b's real identity
+    # -- confirms the credentials lookup that attributes the rejection
+    # event is itself organization-scoped, not just the rejection outcome.
+    assert rejected_rows[0][0] != "agent-b"
 
     discovery_events = conn.execute(
         "SELECT COUNT(*) FROM events WHERE event_type = 'agent.discovered'"

@@ -51,8 +51,9 @@ Registers an agent identity and issues its bearer token in one step. Run again w
 | `--owner` | — | yes | `human create`'s `--id` |
 | `--scope` | — | yes | One or more tool names, space-separated |
 | `--parent-identity` | — | no | The parent's `identity-<agent-id>` id, for delegation |
+| `--ttl-seconds` | — | no | F-016: issue a short-lived credential expiring this many seconds from now, instead of a standing one. Renew it with `credential renew` before it lapses |
 
-Prints the issued token once. There's no separate command to retrieve it later — set it as the agent's `X-BF-Agent-Token` header when you get it, or re-run `register` to issue a fresh one (the old token isn't revoked automatically; see [`versions.md`](versions.md) on the v0.2.0 credential broker for real revocation).
+Prints the issued token once. There's no separate command to retrieve it later — set it as the agent's `X-BF-Agent-Token` header when you get it, or re-run `register` to issue a fresh one (the old token isn't revoked automatically by re-registering — use `credential revoke` for that, below).
 
 ## `claim`
 
@@ -70,6 +71,35 @@ The other half of dual-path agent registration (F-027): claims an agent that the
 Like `register`, prints the issued token once — set it as the agent's `X-BF-Agent-Token` header. Claiming refuses to run against anything not currently in the discovered/unclaimed state (already claimed, or explicitly registered) rather than silently re-owning it — register a fresh identity with `register` instead if that's what you actually want.
 
 An agent that's discovered but never claimed stays visible on the dashboard with no owner — it's never blocked from calling tools, since v0.1.0 is visibility-first, not enforcement-first (see [`security.md`](security.md)).
+
+## `credential renew` / `credential revoke`
+
+F-016/F-009: manage a credential after it's been issued by `register` or `claim`, without touching the agent identity itself. Both act on the token string directly — there's no separate credential id to look up first.
+
+### `credential renew`
+
+Extends a short-lived (`--ttl-seconds`) credential's expiry, so it keeps working past its original TTL. Refuses to touch a credential that's already expired or revoked — issue a fresh one with `register`/`claim` instead; renewal is for staying ahead of an approaching expiry, not for resurrecting a dead one.
+
+| Flag | Env var | Required | Notes |
+| --- | --- | --- | --- |
+| `--db` | `BF_DB` | yes | |
+| `--org` | `BF_ORG` | yes | |
+| `--token` | — | yes | The credential to renew, exactly as printed by `register`/`claim` |
+| `--ttl-seconds` | — | yes | New expiry, this many seconds from now (replaces the old expiry — not added to it) |
+
+### `credential revoke`
+
+F-009's actual kill switch: immediately marks a credential unusable, regardless of any TTL it was issued with. A revoked (or expired) credential isn't just ignored — a caller who presents it is rejected outright, not treated as if it had shown up with no credential at all (see [`security.md`](security.md) on why that distinction matters).
+
+| Flag | Env var | Required | Notes |
+| --- | --- | --- | --- |
+| `--db` | `BF_DB` | yes | |
+| `--org` | `BF_ORG` | yes | |
+| `--token` | — | yes | The credential to revoke |
+
+Refuses to run against a credential that's already revoked (or doesn't exist in this org) rather than silently no-oping.
+
+Takes effect on a live, already-running `gateway` process within `--credential-refresh-seconds` (default 30s) — no restart needed. A call that lands in the gap between revoking and the next refresh can still succeed; that gap is the real, bounded cost of not checking the database on every single request. See [`security.md`](security.md).
 
 ## Reporting events from the OTel SDK (fallback path, F-024)
 
@@ -125,6 +155,7 @@ Runs the gateway: a persistent process that proxies to one backend MCP server, r
 | `--alert-email-password` | `BF_ALERT_EMAIL_PASSWORD` | none | Prefer the env var over the flag — avoids the password landing in shell history |
 | `--alert-email-no-tls` | `BF_ALERT_EMAIL_NO_TLS` | off | Skips STARTTLS |
 | `--gap-threshold` | `BF_GAP_THRESHOLD_SECONDS` | `60.0` | Seconds since the last logged event before a startup gap is marked and alerted (F-042) — see [`security.md`](security.md) |
+| `--credential-refresh-seconds` | `BF_CREDENTIAL_REFRESH_SECONDS` | `30.0` | F-009/F-016: how long a running gateway can keep using its in-memory credential list before checking the database again. Caps how long a `credential revoke` or an expired `--ttl-seconds` credential can keep working against an already-running gateway — see [`security.md`](security.md) |
 
 By default the gateway spawns the backend script inside a locked-down Docker container when Docker is reachable (real filesystem/network isolation), falling back to rlimit-only sandboxing with a logged warning when it isn't — never silently. `--no-container`/`BF_NO_CONTAINER=1` forces the fallback path deliberately; the Docker Compose deployment sets this (see the comment at the top of [`docker-compose.yml`](../docker-compose.yml) for why mounting the host's Docker socket into the gateway's own container isn't the answer).
 

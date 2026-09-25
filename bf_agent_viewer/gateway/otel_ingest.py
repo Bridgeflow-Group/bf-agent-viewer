@@ -160,6 +160,24 @@ def register_otel_ingest_route(gateway, middleware) -> None:
         if identity is not None:
             agent_id = identity.agent_id
             granted_scope = identity.granted_scope
+        elif token is not None:
+            # F-016/T-024: same fix as the MCP path (middleware.py's
+            # on_call_tool) -- a token that WAS presented but doesn't
+            # resolve (revoked, expired, bogus) must not be treated the
+            # same as no token at all. Falling through to passive
+            # discovery here wouldn't let a revoked identity actually
+            # perform a call (this endpoint never could stop that, see
+            # the module docstring), but it would still mean a
+            # scope-violation report from a just-revoked identity gets
+            # silently reclassified as unscoped (granted_scope=None
+            # bypasses the violation check entirely) instead of rejected
+            # -- the same category of gap, even though the stakes are
+            # lower on this after-the-fact reporting path.
+            return JSONResponse(
+                {"error": "the presented credential is not active (revoked, expired, or invalid) -- "
+                          "register a new one or have this one renewed"},
+                status_code=401,
+            )
         else:
             # Same passive-discovery path the MCP gateway falls back to
             # (identity/discovery.py) -- reused as-is by handing it a

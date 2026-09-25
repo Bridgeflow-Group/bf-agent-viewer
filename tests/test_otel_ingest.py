@@ -5,7 +5,10 @@ test_gateway_integration.py) of proving the client and server sides
 actually work together rather than testing each in isolation against
 assumptions about the other."""
 import asyncio
+import json
 import os
+import urllib.error
+import urllib.request
 
 import pytest
 from fastmcp import Client
@@ -16,7 +19,7 @@ from bf_agent_viewer.events import last_hash, verify_chain
 from bf_agent_viewer.gateway import build_gateway
 from bf_agent_viewer.identity import issue_token, register_identity
 from bf_agent_viewer.ratelimit import TokenBucketLimiter
-from bf_agent_viewer.sdk import BFAgentViewerClient, BFAgentViewerReportError
+from bf_agent_viewer.sdk import OTEL_INGEST_PATH, BFAgentViewerClient, BFAgentViewerReportError
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 BACKEND_SCRIPT = os.path.join(HERE, "fixtures", "demo_backend.py")
@@ -63,6 +66,31 @@ async def _record(client, *args, **kwargs):
 
 async def _post(client, *args, **kwargs):
     return await asyncio.to_thread(client._post, *args, **kwargs)
+
+
+def _post_raw_sync(gateway_url, payload, *, token=None):
+    """Bypasses BFAgentViewerClient entirely -- its `token` field is a
+    required str, so it can't express "no token presented at all," only
+    "some token string." Genuine no-token passive discovery (F-016/T-024
+    -- must stay unchanged, distinct from a presented-but-unrecognized
+    token, which is now rejected) needs a raw request with the auth
+    header omitted, not just an empty/placeholder value passed as one."""
+    headers = {"Content-Type": "application/json"}
+    if token is not None:
+        headers["X-BF-Agent-Token"] = token
+    request = urllib.request.Request(
+        f"{gateway_url.rstrip('/')}{OTEL_INGEST_PATH}",
+        data=json.dumps(payload).encode("utf-8"), method="POST", headers=headers,
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=5.0) as response:
+            return response.status, response.read()
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.read()
+
+
+async def _post_raw(*args, **kwargs):
+    return await asyncio.to_thread(_post_raw_sync, *args, **kwargs)
 
 
 @pytest.mark.asyncio
@@ -153,19 +181,35 @@ async def test_reported_error_is_logged_with_error_type_and_result(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_unregistered_caller_is_passively_discovered(tmp_path):
+async def test_unregistered_caller_with_no_token_is_passively_discovered(tmp_path):
+    """Genuinely no token presented at all -- the one case that still gets
+    passive-discovery treatment (F-016/T-024 narrowed this from "any
+    unrecognized token" down to just this). client_info-based discovery
+    here keys off gen_ai.agent.name in the event's own attributes (see
+    otel_ingest.py), not a real MCP clientInfo negotiation, so the agent
+    name has to travel in the payload itself rather than via
+    BFAgentViewerClient's agent_name field -- hence the raw payload
+    instead of the SDK client for this one test."""
     conn = reset(tmp_path / "otel4.db")
     _seed_org_and_human(conn)
 
     server_task, _ = await _run_gateway(conn, port=8983)
     try:
-        client = BFAgentViewerClient(
-            gateway_url="http://127.0.0.1:8983", token="not-a-real-token",
-            agent_name="billing-script", raise_on_error=True,
+        status, body = await _post_raw(
+            "http://127.0.0.1:8983",
+            {
+                "result": "success",
+                "attributes": {
+                    "gen_ai.tool.name": "send_invoice",
+                    "gen_ai.agent.name": "billing-script",
+                },
+            },
+            token=None,
         )
-        await _record(client, "send_invoice", result="success")
     finally:
         await _stop(server_task)
+
+    assert status == 202, body
 
     agent_row = conn.execute(
         "SELECT id, status, name FROM agents WHERE id = 'discovered-billing-script'"
@@ -183,6 +227,43 @@ async def test_unregistered_caller_is_passively_discovered(tmp_path):
         "AND event_type = 'tool.called'"
     ).fetchone()
     assert called_event == ("tool.called", "send_invoice")
+
+
+@pytest.mark.asyncio
+async def test_unrecognized_presented_token_is_rejected_not_discovered(tmp_path):
+    """F-016/T-024: the other half of the same distinction -- a token that
+    WAS presented but doesn't resolve to anything (bogus, revoked,
+    expired) must be rejected outright, not folded into passive discovery
+    the way it was before this task. Otherwise revoking a credential (or
+    letting a short-lived one expire) would leave the caller no worse off
+    than an anonymous visitor -- which, on the MCP path, is actually
+    *unscoped*, strictly more permissive than what a revoked identity had.
+    This endpoint can't grant tool-call capability either way (see the
+    module docstring), but the rejection still needs to be real here too,
+    so a revoked identity's reports don't quietly get reclassified as
+    unscoped instead of refused."""
+    conn = reset(tmp_path / "otel4.db")
+    _seed_org_and_human(conn)
+
+    server_task, _ = await _run_gateway(conn, port=8988)
+    try:
+        status, body = await _post_raw(
+            "http://127.0.0.1:8988",
+            {
+                "result": "success",
+                "attributes": {
+                    "gen_ai.tool.name": "send_invoice",
+                    "gen_ai.agent.name": "billing-script",
+                },
+            },
+            token="not-a-real-token",
+        )
+    finally:
+        await _stop(server_task)
+
+    assert status == 401, body
+    assert conn.execute("SELECT COUNT(*) FROM agents").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 0
 
 
 @pytest.mark.asyncio

@@ -31,7 +31,14 @@ class Identity:
     granted_scope: frozenset[str] | None  # None = unscoped (legacy/unregistered fallback)
 
 
-def issue_token(conn: sqlite3.Connection, *, agent_id: str, issuer: str = "bf-agent-viewer-gateway") -> str:
+def _now_str(offset_seconds: float = 0.0) -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + offset_seconds))
+
+
+def issue_token(
+    conn: sqlite3.Connection, *, agent_id: str, issuer: str = "bf-agent-viewer-gateway",
+    ttl_seconds: float | None = None,
+) -> str:
     """Issue an opaque bearer token for an agent, stored in the existing
     `credentials` table. This is the real per-request identity mechanism
     (see resolve_by_token) -- found necessary Sept 22, 2026 after testing
@@ -48,16 +55,83 @@ def issue_token(conn: sqlite3.Connection, *, agent_id: str, issuer: str = "bf-ag
     sender-constrained credential planned for the v0.2.0 broker (F-038) --
     that's a real upgrade path, not a redesign, since this table is where
     it lands too.
+
+    ttl_seconds (F-016/T-024, v0.2.0): optional. None (the default) issues
+    a standing token with no expiry -- unchanged v0.1.0 behavior, so
+    nothing that already calls this without the new keyword changes
+    behavior. Passing ttl_seconds sets `expiry` to now + that many
+    seconds; load_token_registry() stops resolving it once that's passed,
+    and renew_token() is the only way to push it back out. This is the
+    mechanism basis for F-009's kill switch (see OQ-004): a credential
+    that's short-lived and simply isn't renewed lapses on its own within
+    one refresh interval, without needing a separate real-time revocation
+    path -- revoke_token() exists alongside it for an immediate cutoff
+    rather than waiting out the TTL.
     """
     token = f"bfav_{secrets.token_urlsafe(32)}"
-    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    now = _now_str()
+    expiry = _now_str(ttl_seconds) if ttl_seconds is not None else None
     conn.execute(
-        """INSERT INTO credentials (id, agent_id, type, issuer, status, issued_at)
-           VALUES (?,?,?,?,?,?)""",
-        (token, agent_id, "bearer_token", issuer, "active", now),
+        """INSERT INTO credentials (id, agent_id, type, issuer, status, issued_at, expiry)
+           VALUES (?,?,?,?,?,?,?)""",
+        (token, agent_id, "bearer_token", issuer, "active", now, expiry),
     )
     conn.commit()
     return token
+
+
+def renew_token(conn: sqlite3.Connection, token: str, *, ttl_seconds: float) -> str:
+    """Push a short-lived credential's expiry back out by ttl_seconds from
+    now. The other half of F-009's kill-switch mechanism (see OQ-004):
+    an agent (or whatever schedules renewal on its behalf, e.g. an
+    operator's cron -- v0.1.0/early v0.2.0 doesn't yet have the agent
+    call this itself) keeps calling this on an interval shorter than the
+    TTL; the kill switch is simply *not* doing that anymore, either by
+    stopping the schedule or by calling revoke_token() for an immediate
+    cutoff instead of waiting for the TTL to lapse.
+
+    Deliberately refuses to renew a credential that isn't active or has
+    already expired -- renewal must not be able to resurrect a credential
+    that's already been cut off; issue a new one instead. Raises
+    ValueError in either case, and if the token doesn't exist at all.
+    """
+    row = conn.execute(
+        "SELECT status, expiry FROM credentials WHERE id = ?", (token,)
+    ).fetchone()
+    if row is None:
+        raise ValueError(f"no credential {token!r}")
+    status, expiry = row
+    if status != "active":
+        raise ValueError(f"credential {token!r} is not active (status={status!r}) -- cannot renew it")
+    now = _now_str()
+    if expiry is not None and expiry <= now:
+        raise ValueError(f"credential {token!r} already expired at {expiry} -- issue a new one instead of renewing")
+    new_expiry = _now_str(ttl_seconds)
+    conn.execute("UPDATE credentials SET expiry = ? WHERE id = ?", (new_expiry, token))
+    conn.commit()
+    return new_expiry
+
+
+def revoke_token(conn: sqlite3.Connection, token: str) -> None:
+    """Immediately cut off a credential -- sets status='revoked' and
+    records revoked_at, rather than waiting for a TTL to lapse. Works on
+    any active credential, short-lived or standing (a v0.1.0 token issued
+    with no expiry can still be revoked this way; TTL and revocation are
+    independent mechanisms, not one built only for the other). Excluded
+    from load_token_registry() the next time it refreshes -- see
+    GatewayMiddleware's credential_refresh_seconds for how soon that is.
+    Raises ValueError if there's no active credential by this id to revoke
+    (already revoked, or never existed) -- revoking is not idempotent
+    against a caller's mistake, it should surface one.
+    """
+    now = _now_str()
+    cursor = conn.execute(
+        "UPDATE credentials SET status = 'revoked', revoked_at = ? WHERE id = ? AND status = 'active'",
+        (now, token),
+    )
+    conn.commit()
+    if cursor.rowcount == 0:
+        raise ValueError(f"no active credential {token!r} to revoke")
 
 
 def register_identity(
@@ -188,13 +262,24 @@ def load_registry(
 def load_token_registry(
     conn: sqlite3.Connection, *, organization_id: str | None = None,
 ) -> dict[str, Identity]:
-    """Load all active bearer tokens, keyed by token value, resolved to the
-    issuing agent's identity. This is the primary, transport-safe
-    resolution path -- checked fresh per request by the gateway, no
-    connection-scoped caching involved. Call once per gateway process at
-    startup; a token issued or revoked after that won't be picked up until
-    the process restarts or this is called again (acceptable for v0.1.0;
-    live invalidation is a v0.2.0+ broker concern).
+    """Load all active, unexpired bearer tokens, keyed by token value,
+    resolved to the issuing agent's identity. This is the primary,
+    transport-safe resolution path -- checked fresh per request by the
+    gateway, no connection-scoped caching involved. Call once per gateway
+    process at startup; a token issued, renewed, or revoked after that
+    won't be picked up until this is called again -- see
+    GatewayMiddleware.credential_refresh_seconds (F-016/T-024) for how the
+    gateway itself now calls this again periodically rather than only
+    once, which is what makes a short-lived credential's expiry (or an
+    explicit revoke_token() call) actually take effect without a process
+    restart.
+
+    Expiry filter (F-016/T-024): a credential with a non-null `expiry` in
+    the past is excluded here, the same as a revoked one -- both are
+    "not usable right now," and this is the one place both v0.1.0's
+    standing tokens (expiry always NULL, unaffected) and v0.2.0's
+    short-lived ones are checked, so nothing downstream needs its own
+    separate expiry logic.
 
     organization_id (T-014, org isolation audit): the most severe gap this
     audit found. This is the gateway's actual authentication boundary --
@@ -209,21 +294,24 @@ def load_token_registry(
     one ever legitimately needs to); every real caller in this codebase
     now passes it.
     """
+    now = _now_str()
     if organization_id is not None:
         rows = conn.execute(
             """SELECT c.id, i.id, i.agent_id, i.parent_identity_id, i.granted_scope
                FROM credentials c
                JOIN agent_identities i ON i.agent_id = c.agent_id
                JOIN agents ag ON ag.id = i.agent_id
-               WHERE c.status = 'active' AND ag.organization_id = ?""",
-            (organization_id,),
+               WHERE c.status = 'active' AND (c.expiry IS NULL OR c.expiry > ?)
+                 AND ag.organization_id = ?""",
+            (now, organization_id),
         ).fetchall()
     else:
         rows = conn.execute(
             """SELECT c.id, i.id, i.agent_id, i.parent_identity_id, i.granted_scope
                FROM credentials c
                JOIN agent_identities i ON i.agent_id = c.agent_id
-               WHERE c.status = 'active'"""
+               WHERE c.status = 'active' AND (c.expiry IS NULL OR c.expiry > ?)""",
+            (now,),
         ).fetchall()
     registry: dict[str, Identity] = {}
     for token, identity_id, agent_id, parent_identity_id, granted_scope in rows:

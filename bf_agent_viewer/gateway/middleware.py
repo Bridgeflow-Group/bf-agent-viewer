@@ -50,6 +50,17 @@ TOKEN_HEADER = "x-bf-agent-token"
 # plainly instead of engineering around every edge case up front.
 HEARTBEAT_TOOL_NAME = "bf_heartbeat"
 
+# F-016/T-024: how often a live gateway process re-loads its active-token
+# registry from the database, in seconds. Well under the sub-5-minute
+# kill-switch target (OQ-004) with real headroom -- a revoked or
+# unrenewed-and-expired credential is picked up within one interval of
+# real time on an agent that's still actively calling, not just at the
+# next process restart. Configurable (--credential-refresh-seconds /
+# BF_CREDENTIAL_REFRESH_SECONDS, see cli.py) since the right tradeoff
+# between "how fast can a kill take effect" and "one extra DB query per
+# interval" depends on deployment scale, not something to hardcode.
+DEFAULT_CREDENTIAL_REFRESH_SECONDS = 30.0
+
 
 def _request_headers(context: MiddlewareContext) -> dict[str, str] | None:
     """Best-effort: only present for HTTP-transport connections. stdio
@@ -88,6 +99,7 @@ class GatewayMiddleware(Middleware):
         write_tools: set[str],
         rate_limiter: TokenBucketLimiter | None = None,
         alert_channel: AlertChannel | None = None,
+        credential_refresh_seconds: float = DEFAULT_CREDENTIAL_REFRESH_SECONDS,
     ):
         self.conn = conn
         self.organization_id = organization_id
@@ -105,8 +117,44 @@ class GatewayMiddleware(Middleware):
         # different organization's agent would authenticate successfully
         # here too, as long as both shared the same database file.
         self.token_registry = load_token_registry(conn, organization_id=organization_id)
+        # F-016/T-024: when this was loaded, in monotonic time (never
+        # wall-clock -- immune to a system clock adjustment). Paired with
+        # credential_refresh_seconds in _maybe_refresh_token_registry()
+        # below, this is what makes a short-lived credential's expiry, or
+        # an explicit revoke_token() call, actually take effect on a live
+        # gateway process instead of only at the next restart -- the gap
+        # this module's own docstring used to flag as "acceptable for
+        # v0.1.0, live invalidation is a v0.2.0+ concern." v0.2.0 is now.
+        self._token_registry_loaded_at = time.monotonic()
+        self.credential_refresh_seconds = credential_refresh_seconds
+
+    def _maybe_refresh_token_registry(self) -> None:
+        """Reload self.token_registry from the database if more than
+        credential_refresh_seconds have passed since the last load.
+        Checked synchronously at the top of every identity resolution
+        (both _resolve, for the MCP path, and resolve_token, for the
+        OTel SDK ingestion path -- F-024/T-019) rather than run as a
+        separate background task: a plain timestamp comparison is cheap
+        enough to pay on every request, and doing it this way means no
+        new concurrency to reason about -- it runs on the same thread,
+        at the same point in the request lifecycle, as everything else
+        this module already does before touching running_hash (see the
+        module docstring's concurrency-safety note). The tradeoff worth
+        being explicit about: a revoked or expired credential is only
+        guaranteed gone from self.token_registry as of the *next* request
+        this method happens to run on after the interval elapses, not on
+        a wall-clock timer -- for an agent that's actively calling
+        (the realistic case for something you'd want to kill), that's
+        within one interval of real time; for one that's already gone
+        quiet, there's nothing left to block anyway.
+        """
+        now = time.monotonic()
+        if now - self._token_registry_loaded_at >= self.credential_refresh_seconds:
+            self.token_registry = load_token_registry(self.conn, organization_id=self.organization_id)
+            self._token_registry_loaded_at = now
 
     def _resolve(self, context: MiddlewareContext) -> tuple[Identity | None, str | None]:
+        self._maybe_refresh_token_registry()
         headers = _request_headers(context)
         token = headers.get(TOKEN_HEADER) if headers else None
         identity = self.token_registry.get(token) if token else None
@@ -120,6 +168,84 @@ class GatewayMiddleware(Middleware):
 
         if identity:
             agent_id = identity.agent_id
+        elif token is not None:
+            # F-016/T-024: a token WAS presented but doesn't resolve --
+            # revoked, expired, or simply bogus. Deliberately NOT the same
+            # as no token at all: falling through to passive discovery
+            # here (as an earlier version of this method did) meant
+            # revoking a credential actually *increased* what an agent
+            # could do, from its previously scoped granted_scope to
+            # completely unscoped (passive discovery's granted_scope=None
+            # means no restriction at all) -- the exact opposite of what
+            # F-009's kill switch needs revoke_token()/an expired TTL to
+            # mean. Rejected outright instead, and logged as its own event
+            # type so a flood of these is visible on the dashboard (an
+            # agent still trying to use a credential that's been cut off
+            # is worth knowing about) rather than silently folded into
+            # ordinary passive-discovery traffic.
+            #
+            # events.agent_id is NOT NULL, so this still needs a real
+            # agents row to log against even though the credential isn't
+            # usable: if the token matches a real (revoked/expired)
+            # credentials row *belonging to this gateway's own
+            # organization*, log it under the agent that credential
+            # actually belonged to -- more accurate than a fresh
+            # client_info-based discovery. The organization_id filter
+            # here matters (T-014 discipline): without it, a token issued
+            # for a DIFFERENT organization sharing this database file
+            # would leak that organization's real agent_id into this
+            # organization's event log -- an org-a event pointing at an
+            # org-b agent row, which is exactly the cross-org leak T-014
+            # closed elsewhere. A token that doesn't match any credential
+            # in this organization (never issued at all, or issued for
+            # another organization) falls back to discover_agent()
+            # instead, the same visibility mechanism a no-token caller
+            # gets -- it's still rejected either way, this only affects
+            # which agent_id the rejection event is logged under.
+            cred_row = self.conn.execute(
+                """SELECT c.agent_id FROM credentials c
+                   JOIN agents ag ON ag.id = c.agent_id
+                   WHERE c.id = ? AND ag.organization_id = ?""",
+                (token, self.organization_id),
+            ).fetchone()
+            if cred_row is not None:
+                agent_id = cred_row[0]
+            else:
+                # Same first-sighting discovery event a no-token caller
+                # gets (below) -- a bogus/never-issued/cross-org token is
+                # still worth surfacing as a newly-seen caller on the
+                # dashboard, same visibility principle, even though the
+                # call itself is being rejected either way.
+                agent_id, first_sighting = discover_agent(
+                    self.conn, organization_id=self.organization_id, client_info=client_info,
+                )
+                if first_sighting:
+                    _, self.running_hash = log_event(
+                        self.conn, organization_id=self.organization_id, agent_id=agent_id,
+                        session_id=None, actor_human_id=None, event_type="agent.discovered",
+                        action=None, tool_id=None, result="success",
+                        metadata={"client_info_asserted": str(client_info) if client_info else None},
+                        prev_hash=self.running_hash,
+                    )
+                    self.conn.commit()
+            _, self.running_hash = log_event(
+                self.conn, organization_id=self.organization_id, agent_id=agent_id,
+                session_id=None, actor_human_id=None, event_type="tool.rejected_unrecognized_token",
+                action="write" if tool_name in self.write_tools else "read", tool_id=tool_name,
+                result="denied",
+                metadata={
+                    "arguments": args,
+                    "reason": "presented token does not resolve to an active credential "
+                              "(revoked, expired, or invalid)",
+                    "client_info_asserted": str(client_info) if client_info else None,
+                },
+                prev_hash=self.running_hash,
+            )
+            self.conn.commit()
+            raise PermissionError(
+                "the presented credential is not active (revoked, expired, or invalid) -- "
+                "register a new one or have this one renewed"
+            )
         else:
             # T-012 (F-027, passive discovery): an unrecognized caller no
             # longer just gets its traffic stamped with a fixed sentinel
@@ -128,6 +254,9 @@ class GatewayMiddleware(Middleware):
             # the dashboard the moment it's first seen. Still not trusted
             # (granted_scope stays None below, same as before) -- this is
             # about visibility, not authorization. See identity/discovery.py.
+            # Only reached when NO token was presented at all -- a
+            # presented-but-unrecognized token is rejected above instead
+            # (F-016/T-024), not treated the same as never having one.
             agent_id, first_sighting = discover_agent(
                 self.conn, organization_id=self.organization_id, client_info=client_info,
             )
@@ -238,7 +367,11 @@ class GatewayMiddleware(Middleware):
         """Same lookup `_resolve` does for an MCP connection's header, but
         callable directly from something that isn't a MiddlewareContext --
         the OTel SDK ingestion route (gateway/otel_ingest.py, F-024/T-019)
-        reads its bearer token from a plain Starlette Request instead."""
+        reads its bearer token from a plain Starlette Request instead.
+        Also refreshes the token registry on the same schedule as the MCP
+        path (F-016/T-024) -- a revoked or expired credential must lapse
+        on this path too, not just the one _resolve covers."""
+        self._maybe_refresh_token_registry()
         return self.token_registry.get(token) if token else None
 
     def log_otel_event(

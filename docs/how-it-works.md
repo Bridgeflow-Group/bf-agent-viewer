@@ -1,8 +1,8 @@
 # How It Works
 
-BF Agent Viewer -- living document. Explains how the system works as currently designed: for internal use to spot gaps before they're built, and for prospective customers evaluating whether to install it. Update this doc whenever a mechanism changes; don't let it drift from features.xlsx / open-questions.docx / versions.docx, which remain the detailed source of record.
+BF Agent Viewer -- living document. Explains how the system works as currently designed: for internal use to spot gaps before they're built, and for prospective customers evaluating whether to install it. Update this doc whenever a mechanism changes; don't let it drift from [`features.md`](features.md) / [`versions.md`](versions.md), which remain the detailed source of record.
 
-Reflects design as of September 18, 2026. Nothing described here is built yet -- v0.1.0 is in design.
+Design as of September 18, 2026, updated as mechanisms actually get built. Real implementation of v0.1.0 started September 22, 2026 -- most of what's described below is now built and tested; see [`status.md`](status.md) for exactly what's built vs. still planned.
 
 
 ## 1. What this platform is
@@ -37,7 +37,7 @@ An Agent Identity is a first-class, persistent object -- not a label attached to
 
 When an agent spawns a sub-agent, that's a delegation event, not an unrelated new identity. The sub-agent gets its own identity record, linked to its parent, and its granted permissions can only ever be a subset of its parent's -- authority narrows at every hop, it never widens. Every event a sub-agent produces still traces back through the chain to the original human or system that started the whole workflow, so accountability doesn't get lost just because work was delegated. By default, a sub-agent inherits its parent's owner and environment rather than showing up as ownerless.
 
-Open gap: whether every sub-agent spawn -- including one that lives for a few seconds and never recurs -- creates a full, permanent identity record, or whether short-lived ones get something lighter-weight that's only promoted to a full identity if that role turns out to be recurring. Not yet decided (see open-questions.docx, OQ-007).
+Resolved: every sub-agent spawn -- including one that lives for a few seconds and never recurs -- gets its own full, permanent identity record; there's no lighter-weight tier. What's still undecided is a narrower follow-on question: whether a recurring sub-agent *role* should eventually get "promoted" to its own first-class top-level dashboard row instead of always nesting under its parent (see [`status.md`](status.md)).
 
 
 ## 6. How the kill switch works (planned, v0.2.0)
@@ -52,21 +52,23 @@ What it does not do: it can't undo an action already in flight (a database write
 Default self-hosted deployment is a single binary or container with an embedded SQLite (or libSQL) store -- no separate database process required to get started. Postgres is an explicit upgrade path once event volume or write concurrency actually needs it, not a day-one requirement. This is deliberately lighter than comparable self-hosted tools, which typically need three or four separate infrastructure components running at once.
 
 
-## 8. Known open design questions (internal gap list)
+## 8. Known open design questions
 
-Kept here in plain language for visibility; open-questions.docx has full detail and is the source of record. A prospective customer reading this should treat anything listed here as not yet final.
+Kept here in plain language for visibility. Most of the early open questions below are now resolved as the mechanisms they were about actually got built (see the sections above); kept here for context rather than deleted outright, so a returning reader can see what used to be uncertain.
 
-- OQ-001 -- confirming the SQLite-first deployment is genuinely low-friction enough for a team with no dedicated infra person, not just lighter on paper.
-- OQ-002 -- validating the MCP-gateway-plus-SDK instrumentation approach against real agent setups.
-- OQ-003 -- validating the delegation/identity-boundary model against real multi-agent architectures.
-- OQ-004 -- kill switch mechanism is scoped (credential revocation) but not built or tested.
-- OQ-006 -- dual-path registration is decided; the claiming/credential-rotation flow still needs to be specified in detail.
-- OQ-007 -- whether every sub-agent spawn needs a full identity record, or something lighter for one-shot sub-agents.
+- OQ-001 -- resolved. The SQLite-first deployment is confirmed genuinely lower-friction than the closest comparable self-hosted tool (which needs four separate infrastructure components; this needs one).
+- OQ-002 -- resolved. The MCP-gateway-plus-SDK instrumentation approach (section 3, above) has been validated against multiple independent real agent frameworks, not just designed on paper.
+- OQ-003 -- resolved. The identity boundary is created at every delegation hop, not one fixed line -- see section 5, above.
+- OQ-004 -- still open. The kill switch (v0.2.0, section 6, above) is scoped as credential revocation with a sub-5-minute target, but the exact guarantee it needs to make isn't finalized.
+- OQ-006 -- resolved. Dual-path registration (explicit + passive discovery, section 2, above) is built and tested.
+- OQ-007 -- resolved. See section 5, above.
 
 ## 9. Where to go for more detail
 
-- versions.docx -- version numbers, status, and focus (source of record for versioning).
-- features.xlsx -- every feature, its status, target version, and design notes.
-- open-questions.docx -- full detail on every open/investigating/resolved design question.
-- regulatory-requirements.docx -- how this maps to what governments and enterprise buyers require.
-- AI_Agent_Identity_Platform_Design_Document.docx / AI_Agent_Identity_Platform_Research.docx -- original design and research documents this all builds on.
+- [`versions.md`](versions.md) -- version numbers, status, and focus (source of record for versioning).
+- [`features.md`](features.md) -- every feature, its status, target version, and what it does.
+- [`status.md`](status.md) -- exactly what's built, tested, and verified right now, vs. still planned or blocked.
+- [`security.md`](security.md) -- the platform's security architecture and what it does and doesn't cover yet.
+- [`standards.md`](standards.md) -- the technical/security standards this design follows, tracks, or has deliberately not adopted, and why.
+- [`regulatory.md`](regulatory.md) -- how this maps to what governments and enterprise buyers require.
+- [`research.md`](research.md) (continued in [`research-part-2.md`](research-part-2.md)) -- the running research and validation log this design is built on.

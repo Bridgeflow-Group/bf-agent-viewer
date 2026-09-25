@@ -14,7 +14,13 @@ import os
 import sys
 
 from bf_agent_viewer.db import connect
-from bf_agent_viewer.identity import claim_discovered_agent, issue_token, register_identity
+from bf_agent_viewer.identity import (
+    claim_discovered_agent,
+    issue_token,
+    register_identity,
+    renew_token,
+    revoke_token,
+)
 from bf_agent_viewer.reports import InvalidDateBoundError, export_events_csv
 from bf_agent_viewer.retention import DEFAULT_RETENTION_DAYS, prune_events
 
@@ -60,10 +66,12 @@ def cmd_register(args: argparse.Namespace) -> None:
         granted_scope=args.scope,
         parent_identity_id=args.parent_identity,
     )
-    token = issue_token(conn, agent_id=identity.agent_id)
+    token = issue_token(conn, agent_id=identity.agent_id, ttl_seconds=args.ttl_seconds)
     print(f"registered {identity.agent_id} (identity {identity.identity_id})")
     print(f"token: {token}")
     print("Set this as the X-BF-Agent-Token header on the agent's gateway connections.")
+    if args.ttl_seconds:
+        print(f"Expires in {args.ttl_seconds:g}s -- renew it before then with `bf-agent-viewer credential renew`.")
 
 
 def cmd_claim(args: argparse.Namespace) -> None:
@@ -76,11 +84,38 @@ def cmd_claim(args: argparse.Namespace) -> None:
         granted_scope=args.scope,
         agent_name=args.name,
     )
-    token = issue_token(conn, agent_id=identity.agent_id)
+    token = issue_token(conn, agent_id=identity.agent_id, ttl_seconds=args.ttl_seconds)
     print(f"claimed {identity.agent_id} (identity {identity.identity_id})")
     print(f"token: {token}")
     print("Set this as the X-BF-Agent-Token header on the agent's gateway connections.")
     print("Its prior unauthenticated traffic was never trusted (visible, not granted any scope), so there's nothing to revoke.")
+    if args.ttl_seconds:
+        print(f"Expires in {args.ttl_seconds:g}s -- renew it before then with `bf-agent-viewer credential renew`.")
+
+
+def cmd_credential_renew(args: argparse.Namespace) -> None:
+    conn = connect(args.db)
+    try:
+        new_expiry = renew_token(conn, args.token, ttl_seconds=args.ttl_seconds)
+    except ValueError as e:
+        print(f"error: {e}")
+        raise SystemExit(1)
+    print(f"renewed -- new expiry {new_expiry}")
+
+
+def cmd_credential_revoke(args: argparse.Namespace) -> None:
+    """F-009's actual kill mechanism (see OQ-004): an immediate cutoff
+    rather than waiting for a short-lived credential's TTL to lapse.
+    Works on any active credential, short-lived or standing."""
+    conn = connect(args.db)
+    try:
+        revoke_token(conn, args.token)
+    except ValueError as e:
+        print(f"error: {e}")
+        raise SystemExit(1)
+    print(f"revoked {args.token!r}.")
+    print("Takes effect on a running gateway within its --credential-refresh-seconds "
+          "(default 30s) -- see security.md for the live-invalidation mechanism.")
 
 
 def _build_alert_channel(args: argparse.Namespace):
@@ -128,6 +163,7 @@ def cmd_gateway(args: argparse.Namespace) -> None:
         alert_channel=alert_channel,
         prefer_container=not args.no_container,
         gap_threshold_seconds=args.gap_threshold,
+        credential_refresh_seconds=args.credential_refresh_seconds,
     )
     if args.no_container:
         print("Backend sandboxing: rlimit-only (--no-container passed) -- filesystem/network isolation from the sandboxed container path is NOT in effect.")
@@ -256,6 +292,11 @@ def main(argv: list[str] | None = None) -> int:
     p_register.add_argument("--owner", required=True, help="human_id of the accountable owner")
     p_register.add_argument("--scope", nargs="+", required=True, help="tool names this identity may call")
     p_register.add_argument("--parent-identity", default=None)
+    p_register.add_argument(
+        "--ttl-seconds", type=float, default=None,
+        help="F-016: issue a short-lived credential expiring this many seconds from now, instead of a standing one. "
+             "Omit for v0.1.0's default (no expiry). Renew it with `bf-agent-viewer credential renew` before it lapses.",
+    )
     p_register.set_defaults(func=cmd_register)
 
     p_claim = sub.add_parser("claim", help="Claim a passively-discovered agent (F-027/T-012): assigns a real owner and issues a real identity + credential, replacing its unowned/unclaimed state")
@@ -265,7 +306,24 @@ def main(argv: list[str] | None = None) -> int:
     p_claim.add_argument("--owner", required=True, help="human_id of the accountable owner")
     p_claim.add_argument("--scope", nargs="+", required=True, help="tool names this identity may call")
     p_claim.add_argument("--name", default=None, help="Rename the agent at claim time; defaults to keeping the name it was discovered under")
+    p_claim.add_argument(
+        "--ttl-seconds", type=float, default=None,
+        help="F-016: issue a short-lived credential expiring this many seconds from now, instead of a standing one. "
+             "Omit for v0.1.0's default (no expiry).",
+    )
     p_claim.set_defaults(func=cmd_claim)
+
+    p_credential = sub.add_parser("credential", help="Manage issued credentials (F-016/F-009): renew a short-lived one, or revoke any active one immediately")
+    credential_sub = p_credential.add_subparsers(dest="credential_command", required=True)
+    p_credential_renew = credential_sub.add_parser("renew", help="Push a credential's expiry back out -- the mechanism a short-lived credential relies on to keep working; stopping this is how the future kill switch (F-009) will cut an agent off")
+    p_credential_renew.add_argument("--db", default=_env_default("BF_DB"), required=_env_default("BF_DB") is None)
+    p_credential_renew.add_argument("token", help="The credential (bearer token) to renew")
+    p_credential_renew.add_argument("--ttl-seconds", type=float, required=True, help="Extend the expiry to this many seconds from now")
+    p_credential_renew.set_defaults(func=cmd_credential_renew)
+    p_credential_revoke = credential_sub.add_parser("revoke", help="Immediately cut off a credential (F-009's actual kill mechanism), rather than waiting for a short-lived one's TTL to lapse")
+    p_credential_revoke.add_argument("--db", default=_env_default("BF_DB"), required=_env_default("BF_DB") is None)
+    p_credential_revoke.add_argument("token", help="The credential (bearer token) to revoke")
+    p_credential_revoke.set_defaults(func=cmd_credential_revoke)
 
     p_gateway = sub.add_parser("gateway", help="Run the gateway: proxies to a backend MCP server with identity resolution, scope enforcement, rate limiting, tamper-evident logging, and sandboxed backend spawning")
     p_gateway.add_argument("--db", default=_env_default("BF_DB"), required=_env_default("BF_DB") is None)
@@ -286,6 +344,7 @@ def main(argv: list[str] | None = None) -> int:
     p_gateway.add_argument("--alert-email-password", default=_env_default("BF_ALERT_EMAIL_PASSWORD"), help="Prefer BF_ALERT_EMAIL_PASSWORD over this flag -- avoids the password landing in shell history/process listings")
     p_gateway.add_argument("--alert-email-no-tls", action="store_true", default=_env_default("BF_ALERT_EMAIL_NO_TLS", "") not in ("", "0", "false", "False"))
     p_gateway.add_argument("--gap-threshold", type=float, default=float(_env_default("BF_GAP_THRESHOLD_SECONDS", "60.0")), help="Seconds since the last logged event before a startup gap is marked and alerted (F-042) (BF_GAP_THRESHOLD_SECONDS)")
+    p_gateway.add_argument("--credential-refresh-seconds", type=float, default=float(_env_default("BF_CREDENTIAL_REFRESH_SECONDS", "30.0")), help="F-016/T-024: how often this running gateway re-checks the database for renewed/revoked/expired credentials, without a restart (BF_CREDENTIAL_REFRESH_SECONDS)")
     p_gateway.set_defaults(func=cmd_gateway)
 
     p_console = sub.add_parser("console", help="Run the read-only web console (F-001/002/003/004/005/008), login required (F-040)")

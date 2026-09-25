@@ -11,7 +11,11 @@ from fastmcp.client.transports import StdioTransport
 from fastmcp.server.providers.proxy import ProxyClient, ProxyProvider
 
 from bf_agent_viewer.alerts import AlertChannel
-from bf_agent_viewer.gateway.middleware import HEARTBEAT_TOOL_NAME, GatewayMiddleware
+from bf_agent_viewer.gateway.middleware import (
+    DEFAULT_CREDENTIAL_REFRESH_SECONDS,
+    HEARTBEAT_TOOL_NAME,
+    GatewayMiddleware,
+)
 from bf_agent_viewer.gateway.otel_ingest import register_otel_ingest_route
 from bf_agent_viewer.gateway.resilience import DEFAULT_GAP_THRESHOLD_SECONDS, check_and_log_gap
 from bf_agent_viewer.gateway.sandbox import (
@@ -35,6 +39,7 @@ def build_gateway(
     container_policy: ContainerPolicy | None = None,
     prefer_container: bool = True,
     gap_threshold_seconds: float = DEFAULT_GAP_THRESHOLD_SECONDS,
+    credential_refresh_seconds: float = DEFAULT_CREDENTIAL_REFRESH_SECONDS,
 ) -> tuple[FastMCP, GatewayMiddleware]:
     policy = sandbox_policy or SandboxPolicy()
 
@@ -93,6 +98,7 @@ def build_gateway(
         write_tools=write_tools,
         rate_limiter=rate_limiter,
         alert_channel=alert_channel,
+        credential_refresh_seconds=credential_refresh_seconds,
     )
     gateway.add_middleware(middleware)
 
