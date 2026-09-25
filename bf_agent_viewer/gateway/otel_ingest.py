@@ -198,6 +198,11 @@ def register_otel_ingest_route(gateway, middleware) -> None:
                     event_type="agent.discovered",
                     metadata={"client_info_asserted": client_info_name(client_info)},
                 )
+                # F-048/T-039: same passive-discovery alert the MCP
+                # gateway path fires on its own first_sighting -- one
+                # visibility guarantee, not two, regardless of which
+                # instrumentation path noticed the new agent first.
+                middleware._fire_discovery_alert(agent_id, client_info)
 
         # Ingestion-pipeline protection only (see module docstring): this
         # is NOT the same guarantee F-041's rate limiting gives the MCP

@@ -153,6 +153,26 @@ class GatewayMiddleware(Middleware):
             self.token_registry = load_token_registry(self.conn, organization_id=self.organization_id)
             self._token_registry_loaded_at = now
 
+    def _fire_discovery_alert(self, agent_id: str, client_info: Any) -> None:
+        """F-048/T-039: fire an F-036 alert the moment discover_agent()
+        reports first_sighting=True, right alongside the one-time
+        agent.discovered event both call sites below already log --
+        same wiring pattern gateway/resilience.py's gap-marker alert
+        already uses (persist-then-deliver, never raises on a delivery
+        failure). Non-blocking on purpose: F-027 passive discovery
+        already makes a newly-seen agent visible on the dashboard with
+        or without this: the alert is what means someone doesn't have
+        to be staring at the dashboard right when it happens to notice
+        -- so severity="info", not "warning", since an unclaimed agent
+        showing up isn't itself a problem, just something worth a look."""
+        fire_alert(
+            self.conn, self.alert_channel, organization_id=self.organization_id,
+            agent_id=agent_id, alert_type="agent_discovered", severity="info",
+            message=f"a new, unclaimed agent ('{agent_id}') was passively discovered -- "
+                    f"claim it with 'bf-agent-viewer claim' to assign an owner and issue it a real credential",
+            metadata={"client_info_asserted": str(client_info) if client_info else None},
+        )
+
     def _resolve(self, context: MiddlewareContext) -> tuple[Identity | None, str | None]:
         self._maybe_refresh_token_registry()
         headers = _request_headers(context)
@@ -228,6 +248,7 @@ class GatewayMiddleware(Middleware):
                         prev_hash=self.running_hash,
                     )
                     self.conn.commit()
+                    self._fire_discovery_alert(agent_id, client_info)
             _, self.running_hash = log_event(
                 self.conn, organization_id=self.organization_id, agent_id=agent_id,
                 session_id=None, actor_human_id=None, event_type="tool.rejected_unrecognized_token",
@@ -269,6 +290,7 @@ class GatewayMiddleware(Middleware):
                     prev_hash=self.running_hash,
                 )
                 self.conn.commit()
+                self._fire_discovery_alert(agent_id, client_info)
 
         # F-047: a heartbeat isn't a real capability -- it doesn't touch
         # the backend, doesn't need to be in anyone's granted_scope, and
