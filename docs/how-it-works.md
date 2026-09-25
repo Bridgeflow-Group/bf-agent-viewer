@@ -7,7 +7,7 @@ Design as of September 18, 2026, updated as mechanisms actually get built. Real 
 
 ## 1. What this platform is
 
-An open-source, self-hosted identity and visibility layer for AI agents. The first release answers one question well: what are my agents, and what are they actually doing? It does not enforce or block anything in v0.1.0 -- visibility comes first, control comes later, deliberately.
+An open-source, self-hosted identity and visibility layer for AI agents. The first release answers one question well: what are my agents, and what are they actually doing? Visibility came first, deliberately -- and once it existed, one narrow piece of control came with it in the same release: `credential revoke`, an immediate kill switch (section 6, below). v0.1.0 does not do fine-grained, real-time policy enforcement over individual calls -- that's still later work -- but "no enforcement at all" is no longer accurate as of this release.
 
 
 ## 2. How an agent gets found and registered
@@ -40,11 +40,13 @@ When an agent spawns a sub-agent, that's a delegation event, not an unrelated ne
 Resolved: every sub-agent spawn -- including one that lives for a few seconds and never recurs -- gets its own full, permanent identity record; there's no lighter-weight tier. What's still undecided is a narrower follow-on question: whether a recurring sub-agent *role* should eventually get "promoted" to its own first-class top-level dashboard row instead of always nesting under its parent (see [`status.md`](status.md)).
 
 
-## 6. How the kill switch works (planned, v0.2.0)
+## 6. How the kill switch works (built, v0.1.0)
 
-Not built in v0.1.0. When it ships, it works by revoking short-lived, platform-issued credentials rather than intercepting every call in real time -- the platform simply stops renewing an agent's credentials, and its access lapses within the credential's TTL window. Target: under 5 minutes for a production agent, under 1 minute for one with transaction authority.
+Originally scoped for v0.2.0, but pulled forward once building T-022 (the kill switch itself) turned out to need T-024 (short-lived, platform-issued credentials) as a real prerequisite anyway -- see [`status.md`](status.md). Works by revocation, not by intercepting every call in real time: `bf-agent-viewer credential revoke` immediately marks a credential unusable, and any credential can optionally be issued with a TTL (`register --ttl-seconds`/`claim`, extended before it lapses with `credential renew`) so it expires on its own without an explicit revoke call. A running gateway process doesn't need restarting to pick either one up -- it reloads its in-memory credential list from the database on a short, configurable interval (`--credential-refresh-seconds`, default 30s), well under the sub-5-minute target.
 
-What it does not do: it can't undo an action already in flight (a database write already sent isn't rolled back), and it only covers activity that actually routes through the platform's enforcement point -- an agent's access outside that surface can't be revoked this way.
+A real security property, not just a documented promise: a credential that's been revoked or has expired and is still *presented* is rejected outright, not treated the same as a caller with no credential at all -- the two cases used to be folded together, which meant revoking a credential actually left an agent *less* restricted (unscoped, via passive discovery) than before. Fixed as part of building this; see [`security.md`](security.md).
+
+What it does not do: it can't undo an action already in flight (a database write already sent isn't rolled back), it only covers activity that actually routes through the platform's own enforcement point (the gateway or the OTel ingestion route), and it's revocation of an agent's *whole* credential, not fine-grained blocking of one specific tool call while leaving the rest of its access intact -- that level of real-time, per-call policy enforcement is still later work (v0.3.0's runtime policy engine, [`versions.md`](versions.md)).
 
 
 ## 7. How it's deployed
@@ -59,7 +61,7 @@ Kept here in plain language for visibility. Most of the early open questions bel
 - OQ-001 -- resolved. The SQLite-first deployment is confirmed genuinely lower-friction than the closest comparable self-hosted tool (which needs four separate infrastructure components; this needs one).
 - OQ-002 -- resolved. The MCP-gateway-plus-SDK instrumentation approach (section 3, above) has been validated against multiple independent real agent frameworks, not just designed on paper.
 - OQ-003 -- resolved. The identity boundary is created at every delegation hop, not one fixed line -- see section 5, above.
-- OQ-004 -- still open. The kill switch (v0.2.0, section 6, above) is scoped as credential revocation with a sub-5-minute target, but the exact guarantee it needs to make isn't finalized.
+- OQ-004 -- resolved, and built. The kill switch (section 6, above) shipped in v0.1.0 as credential revocation, well under the sub-5-minute target (default 30s propagation on a live gateway).
 - OQ-006 -- resolved. Dual-path registration (explicit + passive discovery, section 2, above) is built and tested.
 - OQ-007 -- resolved. See section 5, above.
 

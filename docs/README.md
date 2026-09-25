@@ -20,7 +20,7 @@ Starts the gateway (`:8941`) and console (`:8942`) against a small bundled examp
 
 ## Why visibility first
 
-A kill switch without a clear audit trail tells you *that* something went wrong, not *which* tool call crossed the line. So v0.1.0 does one thing: agent registry, activity/event logging, identity and ownership metadata, search. No policy enforcement, no kill switch — those come later, once there's something real to enforce against. See [`versions.md`](versions.md) for the full roadmap.
+A kill switch without a clear audit trail tells you *that* something went wrong, not *which* tool call crossed the line. So v0.1.0's core is visibility: agent registry, activity/event logging (tamper-evident, with an external signed anchor so a database-level compromise alone can't fake the history), identity and ownership metadata, search. That's what makes the one piece of control v0.1.0 does ship — `credential revoke`, an immediate kill switch that cuts an agent's credential off on a live gateway within seconds, no restart needed — meaningful rather than a shot in the dark: it's revocation of something with a real identity and a real activity trail behind it, not fine-grained real-time policy enforcement over every call, which is still a later release. See [`security.md`](security.md) for exactly what v0.1.0 does and doesn't do, and [`versions.md`](versions.md) for the full roadmap.
 
 ## Who this is for
 
@@ -39,7 +39,7 @@ Apache 2.0. Self-hosted deployments are never capped by agent count — run it a
 - [`market.md`](market.md) — the market this is built for
 - [`versions.md`](versions.md) — the version-by-version roadmap (v0.1.0 through v0.4.0)
 - [`licensing-model.md`](licensing-model.md) — the Free/Paid/Enterprise model
-- [`how-it-works.md`](how-it-works.md) — how registration, instrumentation, identity, delegation, and (eventually) the kill switch actually work
+- [`how-it-works.md`](how-it-works.md) — how registration, instrumentation, identity, delegation, and the kill switch actually work
 - [`security.md`](security.md) — the platform's own security architecture and what it does and doesn't do yet
 - [`standards.md`](standards.md) — technical and security standards this design follows, tracks, or has deliberately not adopted, and why
 - [`regulatory.md`](regulatory.md) — the legal and compliance landscape (EU AI Act and similar)
@@ -47,4 +47,4 @@ Apache 2.0. Self-hosted deployments are never capped by agent count — run it a
 
 ## Get involved
 
-The design is public and the first real code is landing now. If this is a problem you've run into, or you want to help shape the design, open an issue or start a discussion — feedback is useful at this stage whether it's about the architecture or the code.
+v0.1.0's implementation is complete and test-covered. If this is a problem you've run into, or you want to help shape the design, open an issue or start a discussion — feedback is useful whether it's about the architecture or the code.

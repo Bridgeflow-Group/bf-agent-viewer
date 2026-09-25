@@ -4,7 +4,7 @@ The one place this repo's current build status gets updated. Every other doc tha
 
 ## Where things stand
 
-**v0.1.0 is building.** Real implementation started September 22, 2026, porting validated prototype logic into a tested, installable package.
+**v0.1.0's implementation is complete.** Real implementation started September 22, 2026, porting validated prototype logic into a tested, installable package; every v0.1.0-scoped task is now `done` except one (see "Blocked," below). Full test suite: 201 passed, 5 skipped. What's left before an actual `v0.1.0` tag is cut isn't build work — it's T-013 (verifying the container image actually builds against a real container registry, which this dev sandbox's egress policy blocks) and whatever release-process steps the maintainers want to run through by hand.
 
 **Built and passing tests:**
 

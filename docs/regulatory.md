@@ -7,7 +7,7 @@ How BF Agent Viewer's design maps to current AI agent regulation and frameworks.
 - **Article 12 / Annex III — automatic logging.** High-risk AI systems must automatically log events over their lifetime. This only applies when an agent's use case is legally "high-risk" (credit, hiring, healthcare, insurance, emergency triage, and similar) — not every SMB agent use case qualifies. Covered by the agent registry and event collection.
 - **Article 19 / 26 — retention.** A minimum 6-month log retention period applies to high-risk system logs. v0.1.0 supports a configurable retention policy with a compliance-safe default.
 - **Tamper-resistance.** Standard mutable logs aren't sufficient as evidence for regulators. Event records are tamper-evident by design — see [`security.md`](security.md).
-- **Article 14 — human oversight.** Requires a "stop" capability for in-scope systems. This is the v0.2.0 kill switch, built on credential revocation.
+- **Article 14 — human oversight.** Requires a "stop" capability for in-scope systems. This is the kill switch, built on credential revocation — shipped in v0.1.0 (originally scoped for v0.2.0, pulled forward once it turned out to need short-lived credential support as a real prerequisite anyway).
 
 ## NIST AI Risk Management Framework — Agentic Profile
 

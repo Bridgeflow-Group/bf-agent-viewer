@@ -18,7 +18,7 @@ NewCore, Astrix, and Aembit all assume the customer already has someone whose jo
 
 ### Visibility first, not control first
 
-All three incumbents lead with policy enforcement, credential brokering, and access governance as their core value. v0.1.0 deliberately does none of that. This is a defensible sequencing choice, not a feature gap: research (Pebblous, cited in research doc section 11.7) found that a kill switch without identity/event lineage is 'a shot in the dark.' A buyer with no governance maturity isn't well served by control they can't operate yet -- visibility has to come first for this buyer specifically.
+All three incumbents lead with policy enforcement, credential brokering, and access governance as their core value. v0.1.0 deliberately doesn't lead with any of that, and still doesn't do fine-grained, real-time policy enforcement or run its own credential-brokering service -- those stay later work. The one narrow exception, added once visibility already existed to make it meaningful rather than a shot in the dark: `credential revoke`, an immediate kill switch built on top of the identity/event lineage v0.1.0 establishes first. This is a defensible sequencing choice, not a feature gap: research (Pebblous, cited in research doc section 11.7) found that a kill switch without identity/event lineage is 'a shot in the dark' -- which is exactly why this one only shipped once that lineage was already real, not before. A buyer with no governance maturity isn't well served by control they can't operate yet -- visibility has to come first for this buyer specifically.
 
 
 ### Self-hosted and uncapped vs. enterprise-priced

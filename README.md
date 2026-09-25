@@ -33,7 +33,7 @@ Prefer running without Docker? `pip install -e ".[console]"` and the same `bf-ag
 
 ## Why visibility first
 
-A kill switch without a clear audit trail tells you *that* something went wrong, not *which* tool call crossed the line. So v0.1.0 does one thing: agent registry, activity/event logging, identity and ownership metadata, search. No policy enforcement, no kill switch — those come later, once there's something real to enforce against. See [`docs/versions.md`](docs/versions.md) for the full roadmap.
+A kill switch without a clear audit trail tells you *that* something went wrong, not *which* tool call crossed the line. So v0.1.0's core is visibility: agent registry, activity/event logging (tamper-evident, with an external signed anchor so a database-level compromise alone can't fake the history), identity and ownership metadata, search. That's what makes the one piece of control v0.1.0 does ship — `credential revoke`, an immediate kill switch that cuts an agent's credential off on a live gateway within seconds, no restart needed — meaningful rather than a shot in the dark: it's revocation of something with a real identity and a real activity trail behind it, not fine-grained real-time policy enforcement over every call, which is still a later release. See [`docs/security.md`](docs/security.md) for exactly what v0.1.0 does and doesn't do, and [`docs/versions.md`](docs/versions.md) for the full roadmap.
 
 ## Who this is for
 
@@ -50,7 +50,7 @@ Apache 2.0. Self-hosted deployments are never capped by agent count — run it a
 - [`docs/positioning.md`](docs/positioning.md) — how this differs from existing agent identity/security tools, and why
 - [`docs/versions.md`](docs/versions.md) — the version-by-version roadmap (v0.1.0 through v0.4.0)
 - [`docs/licensing-model.md`](docs/licensing-model.md) — the Free/Paid/Enterprise model
-- [`docs/how-it-works.md`](docs/how-it-works.md) — how registration, instrumentation, identity, delegation, and (eventually) the kill switch actually work
+- [`docs/how-it-works.md`](docs/how-it-works.md) — how registration, instrumentation, identity, delegation, and the kill switch actually work
 - [`docs/market.md`](docs/market.md) — the market data behind the thesis: adoption, incidents, the identity governance gap, regulatory pressure
 - [`docs/security.md`](docs/security.md) — the security model and architecture, including an honest list of what v0.1.0 doesn't do yet
 - [`docs/regulatory.md`](docs/regulatory.md) — how the design maps to the EU AI Act, NIST AI RMF, and other current frameworks
