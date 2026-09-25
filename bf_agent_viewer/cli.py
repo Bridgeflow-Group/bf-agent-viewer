@@ -21,6 +21,12 @@ from bf_agent_viewer.identity import (
     renew_token,
     revoke_token,
 )
+from bf_agent_viewer.integrity import (
+    default_checkpoint_path,
+    default_signing_key_path,
+    verify_against_events,
+    write_checkpoint,
+)
 from bf_agent_viewer.reports import InvalidDateBoundError, export_events_csv
 from bf_agent_viewer.retention import DEFAULT_RETENTION_DAYS, prune_events
 
@@ -261,6 +267,44 @@ def cmd_retention_prune(args: argparse.Namespace) -> None:
         print(f"chain checkpoint recorded: {result.chain_tip_hash}")
 
 
+def _resolve_checkpoint_paths(args: argparse.Namespace) -> tuple[str, str]:
+    checkpoint_path = args.checkpoint_path or str(default_checkpoint_path(args.db))
+    key_path = args.signing_key_path or str(default_signing_key_path(args.db))
+    return checkpoint_path, key_path
+
+
+def cmd_checkpoint_write(args: argparse.Namespace) -> None:
+    """F-014/T-040: append one signed checkpoint anchoring the event
+    chain's current tip outside the SQLite database. Intended to be run
+    on a schedule (e.g. a periodic cron entry alongside `retention
+    prune`) -- v0.1.0 doesn't run this automatically on its own; see
+    CLI.md. Generates the install-time signing keypair on its first-ever
+    call if one doesn't already exist at --signing-key-path."""
+    conn = connect(args.db)
+    checkpoint_path, key_path = _resolve_checkpoint_paths(args)
+    checkpoint = write_checkpoint(conn, checkpoint_path=checkpoint_path, key_path=key_path)
+    print(f"checkpoint seq {checkpoint.seq} written to {checkpoint_path}")
+    print(f"chain tip: {checkpoint.chain_tip_hash}")
+    print(f"event count at checkpoint: {checkpoint.event_count}")
+
+
+def cmd_checkpoint_verify(args: argparse.Namespace) -> None:
+    """F-014/T-040: verify the checkpoint file's own signature chain,
+    and cross-check its latest entry against the live database's event
+    chain -- the actual point of having an external anchor at all. See
+    bf_agent_viewer/integrity/checkpoint.py's module docstring."""
+    conn = connect(args.db)
+    checkpoint_path, key_path = _resolve_checkpoint_paths(args)
+    ok, detail = verify_against_events(conn, checkpoint_path=checkpoint_path, key_path=key_path)
+    if ok:
+        print(f"OK -- checkpoint file at {checkpoint_path} verifies cleanly against {args.db}")
+        if detail:
+            print(detail)
+    else:
+        print(f"TAMPER DETECTED (or checkpoint/database mismatch): {detail}")
+        raise SystemExit(1)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="bf-agent-viewer")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -388,6 +432,28 @@ def main(argv: list[str] | None = None) -> int:
              f"retention, REQ-002) (BF_RETENTION_DAYS)",
     )
     p_retention_prune.set_defaults(func=cmd_retention_prune)
+
+    p_checkpoint = sub.add_parser("checkpoint", help="External chain-tip anchor for the tamper-evident event log (F-014): periodic signed checkpoints outside the database")
+    checkpoint_sub = p_checkpoint.add_subparsers(dest="checkpoint_command", required=True)
+
+    p_checkpoint_write = checkpoint_sub.add_parser("write", help="Append one signed checkpoint recording the event chain's current tip")
+    p_checkpoint_write.add_argument("--db", default=_env_default("BF_DB"), required=_env_default("BF_DB") is None)
+    p_checkpoint_write.add_argument(
+        "--checkpoint-path", default=_env_default("BF_CHECKPOINT_PATH"),
+        help="Where to append checkpoints (default: <db>.checkpoints.jsonl, alongside the database)",
+    )
+    p_checkpoint_write.add_argument(
+        "--signing-key-path", default=_env_default("BF_CHECKPOINT_SIGNING_KEY_PATH"),
+        help="Install-time Ed25519 signing key (default: <db>.checkpoint-signing-key). "
+             "Generated automatically on first use if it doesn't exist yet",
+    )
+    p_checkpoint_write.set_defaults(func=cmd_checkpoint_write)
+
+    p_checkpoint_verify = checkpoint_sub.add_parser("verify", help="Verify the checkpoint file's signature chain and cross-check it against the live event log")
+    p_checkpoint_verify.add_argument("--db", default=_env_default("BF_DB"), required=_env_default("BF_DB") is None)
+    p_checkpoint_verify.add_argument("--checkpoint-path", default=_env_default("BF_CHECKPOINT_PATH"))
+    p_checkpoint_verify.add_argument("--signing-key-path", default=_env_default("BF_CHECKPOINT_SIGNING_KEY_PATH"))
+    p_checkpoint_verify.set_defaults(func=cmd_checkpoint_verify)
 
     args = parser.parse_args(argv)
     args.func(args)

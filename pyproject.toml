@@ -18,6 +18,14 @@ dependencies = [
     # part of the plain `bf-agent-viewer gateway` path, no extras
     # required.
     "starlette>=1.0",
+    # F-014/T-040: the external chain-tip anchor (bf_agent_viewer.integrity)
+    # signs each checkpoint with an install-time Ed25519 keypair. Part of
+    # the base install (not an extra) since `bf-agent-viewer checkpoint
+    # write`/`checkpoint verify` are plain CLI commands, no console
+    # required -- not a transitive dependency of anything else this
+    # project pulls in (confirmed before adding it; see the starlette
+    # comment above for why that check matters).
+    "cryptography>=42.0",
 ]
 
 [project.optional-dependencies]

@@ -223,6 +223,42 @@ Safe to run repeatedly (a run with nothing yet past the window is a no-op) and s
 bf-agent-viewer retention prune --db bf.db --retention-days 180
 ```
 
+## `checkpoint write` / `checkpoint verify`
+
+F-014's external chain-tip anchor (T-040): the event log's tamper-evident hash chain (see [`security.md`](security.md)) proves nothing was altered *after* a known-good chain tip — but the tip itself, and every row, live in the one SQLite file a database-level compromise already controls. These two commands are what anchors the chain against that: a periodic signed checkpoint written to a second local file, separate from the database, that a database-only attacker can't forge without the install's own private signing key.
+
+### `checkpoint write`
+
+Appends one signed checkpoint recording the event chain's current tip. Not run automatically — run it yourself on a schedule (a periodic cron entry alongside `retention prune` above is the simplest option). Generates an Ed25519 signing keypair on its very first call if one doesn't already exist at `--signing-key-path`, and reuses it on every call after that — the private key is written with `0600` permissions and is never touched by, or stored in, the SQLite database itself.
+
+| Flag | Env var | Default | Notes |
+| --- | --- | --- | --- |
+| `--db` | `BF_DB` | — (required) | |
+| `--checkpoint-path` | `BF_CHECKPOINT_PATH` | `<db>.checkpoints.jsonl` | Where checkpoints are appended — alongside the database file by default, so a simple off-box backup of that directory picks up both |
+| `--signing-key-path` | `BF_CHECKPOINT_SIGNING_KEY_PATH` | `<db>.checkpoint-signing-key` | The install-time signing key. A `.pub` file is written alongside it (`<signing-key-path>.pub`) — that's the file `checkpoint verify` actually needs, and the one worth copying off-box to verify checkpoints independently of the host that signed them |
+
+Each checkpoint entry also chains to the previous one (its own small hash chain, independent of the event log's) and, where the OS supports it (`chattr +a` on Linux), the checkpoint file itself is marked append-only after every write — a deterrent against a casual overwrite, not a hard barrier against a root-level attacker who can remove that flag just as easily. Safe to run repeatedly and against a database still receiving live gateway traffic.
+
+```
+bf-agent-viewer checkpoint write --db bf.db
+```
+
+### `checkpoint verify`
+
+Verifies the checkpoint file's own signature chain, then cross-checks its latest entry against the live database: confirms that entry's signed chain-tip hash actually appears as a real row in the current event table. That's the check that catches what `events.verify_chain()` alone can't — a database-level compromise that regenerated a fresh, internally-consistent-but-fake event history from scratch would still fail this, since producing a matching signature requires the private key, which the fake history never had access to. Exits non-zero (and prints `TAMPER DETECTED`) if anything doesn't check out.
+
+| Flag | Env var | Default | Notes |
+| --- | --- | --- | --- |
+| `--db` | `BF_DB` | — (required) | |
+| `--checkpoint-path` | `BF_CHECKPOINT_PATH` | `<db>.checkpoints.jsonl` | |
+| `--signing-key-path` | `BF_CHECKPOINT_SIGNING_KEY_PATH` | `<db>.checkpoint-signing-key` | Only the `.pub` file is actually read for verification |
+
+```
+bf-agent-viewer checkpoint verify --db bf.db
+```
+
+Only catches tampering at or before the *latest* checkpoint — anything altered after the last `checkpoint write` and before the next one is invisible until that next checkpoint is due, which is why `checkpoint write` needs to actually run on a schedule, not just once at install time. For real protection against a root-level attacker (rather than a casual or app-layer-only compromise), back the checkpoint file — and ideally the signing key — up off-box; this platform can't enforce that part itself.
+
 ## A complete first run
 
 ```
