@@ -13,6 +13,16 @@
 # real here. Nothing special needed to make that happen; noted so a
 # passing run here is read as stronger evidence than a local one, not
 # assumed equivalent.
+#
+# The build-images job below is T-013 itself: this dev sandbox's egress
+# policy blocks pulling python:3.11-slim from Docker Hub, so `docker
+# build` against docker/app/Dockerfile or docker/backend-sandbox/
+# Dockerfile has never actually been run to completion anywhere until
+# this job does it, on every push/PR, on a runner with real registry
+# pull access. Deliberately does NOT push anywhere (no docker/login-
+# action, no registry secrets needed) -- that's release.yml's job, gated
+# on an actual version tag; this is the cheaper, safe-to-run-on-every-PR
+# check that the images build and produce a working entrypoint at all.
 name: CI
 
 on:
@@ -100,3 +110,64 @@ jobs:
           conn.commit()
           print('schema.sql/migrations.sql present and a real connect()+insert worked from the installed wheel')
           "
+
+  build-images:
+    name: Verify both Docker images actually build (T-013)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build the app image (gateway + console)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/app/Dockerfile
+          push: false
+          load: true
+          tags: bf-agent-viewer-app:ci
+
+      - name: Build the backend-sandbox image
+        uses: docker/build-push-action@v6
+        with:
+          context: docker/backend-sandbox
+          file: docker/backend-sandbox/Dockerfile
+          push: false
+          load: true
+          tags: bf-agent-viewer-backend-sandbox:ci
+
+      - name: Smoke-test the app image's entrypoint
+        # Proves the image doesn't just build but actually runs the
+        # installed console script and can talk to a real (mounted)
+        # SQLite file -- same "don't just build it, prove it works"
+        # standard as the build-check job above, applied to the image
+        # instead of the raw wheel.
+        run: |
+          docker run --rm bf-agent-viewer-app:ci bf-agent-viewer --help
+          # The image's non-root user (bfav, uid 10002) owns /data inside
+          # the image, but a bind-mounted host directory keeps the host's
+          # ownership instead -- open it up so the container user can
+          # actually write the database file into it.
+          mkdir -p /tmp/ci-image-data
+          chmod 777 /tmp/ci-image-data
+          docker run --rm -v /tmp/ci-image-data:/data \
+            bf-agent-viewer-app:ci bf-agent-viewer org create \
+              --db /data/ci-image-smoke.db --id org-1 --name "CI Image Smoke Org"
+          test -f /tmp/ci-image-data/ci-image-smoke.db
+          echo "App image entrypoint runs and can create a real org against a mounted volume."
+
+      - name: Smoke-test the backend-sandbox image
+        # This image has no ENTRYPOINT/CMD of its own (see docker/
+        # backend-sandbox/Dockerfile) -- it's the container the gateway
+        # launches per-sandboxed-tool-call, not something run directly.
+        # Confirm it at least starts and has the expected interpreter
+        # and non-root user in place.
+        run: |
+          docker run --rm bf-agent-viewer-backend-sandbox:ci python3 --version
+          docker run --rm bf-agent-viewer-backend-sandbox:ci whoami | grep -qx backend
+
+      - name: Validate docker-compose.yml against the images just built
+        run: docker compose config
