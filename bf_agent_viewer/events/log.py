@@ -37,6 +37,42 @@ def new_id() -> str:
     return str(uuid.uuid4())
 
 
+# Event hash versions. v1 (original) hashed only six fields, so result,
+# tool_id, metadata, actor_human_id, organization_id, session_id and source
+# could be edited without breaking the chain. v2 hashes every stored column
+# except the DB-assigned created_at. Rows keep their own event_version, so
+# a database with v1 history still verifies; only new events get v2.
+HASH_VERSION = "v2"
+
+
+def _payload_v1(*, id, occurred_at, agent_id, event_type, action, resource_id, **_ignored) -> dict[str, Any]:
+    return {
+        "id": id, "occurred_at": occurred_at, "agent_id": agent_id,
+        "event_type": event_type, "action": action, "resource_id": resource_id,
+    }
+
+
+def _payload_v2(*, id, occurred_at, organization_id, agent_id, session_id,
+                actor_human_id, event_type, action, tool_id, resource_id,
+                environment, source, result, request_id, metadata, **_ignored) -> dict[str, Any]:
+    # metadata is the exact JSON text stored in the row, so verification
+    # re-hashes what is in the database rather than a re-serialisation.
+    return {
+        "event_version": "v2", "id": id, "occurred_at": occurred_at,
+        "organization_id": organization_id, "agent_id": agent_id,
+        "session_id": session_id, "actor_human_id": actor_human_id,
+        "event_type": event_type, "action": action, "tool_id": tool_id,
+        "resource_id": resource_id, "environment": environment,
+        "source": source, "result": result, "request_id": request_id,
+        "metadata": metadata,
+    }
+
+
+def _chain_hash(prev_hash: str, version: str, fields: dict[str, Any]) -> str:
+    payload = _payload_v1(**fields) if version == "v1" else _payload_v2(**fields)
+    return hashlib.sha256((prev_hash + json.dumps(payload, sort_keys=True)).encode()).hexdigest()
+
+
 def _latest_checkpoint_hash(conn: sqlite3.Connection) -> str | None:
     """The chain_tip_hash of the most recent retention prune (F-019), or
     None if no prune has ever run against this database. Tolerates the
@@ -94,27 +130,25 @@ def log_event(
     call from this writer."""
     event_id = new_id()
     occurred_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-    payload = {
-        "id": event_id,
-        "occurred_at": occurred_at,
-        "agent_id": agent_id,
-        "event_type": event_type,
-        "action": action,
-        "resource_id": resource_id,
-    }
-    content_hash = hashlib.sha256(
-        (prev_hash + json.dumps(payload, sort_keys=True)).encode()
-    ).hexdigest()
+    request_id = new_id()
+    metadata_json = json.dumps(metadata or {})
+    content_hash = _chain_hash(prev_hash, HASH_VERSION, dict(
+        id=event_id, occurred_at=occurred_at, organization_id=organization_id,
+        agent_id=agent_id, session_id=session_id, actor_human_id=actor_human_id,
+        event_type=event_type, action=action, tool_id=tool_id, resource_id=resource_id,
+        environment=environment, source=source, result=result,
+        request_id=request_id, metadata=metadata_json,
+    ))
 
     conn.execute(
-        """INSERT INTO events (id, occurred_at, organization_id, agent_id, session_id,
+        """INSERT INTO events (id, event_version, occurred_at, organization_id, agent_id, session_id,
            actor_human_id, event_type, action, tool_id, resource_id, environment,
            source, result, request_id, metadata, content_hash)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
-            event_id, occurred_at, organization_id, agent_id, session_id,
+            event_id, HASH_VERSION, occurred_at, organization_id, agent_id, session_id,
             actor_human_id, event_type, action, tool_id, resource_id,
-            environment, source, result, new_id(), json.dumps(metadata or {}),
+            environment, source, result, request_id, metadata_json,
             content_hash,
         ),
     )
@@ -130,25 +164,22 @@ def verify_chain(conn: sqlite3.Connection) -> tuple[bool, str | None]:
     GENESIS -- correct whether or not F-019 retention pruning has ever
     run against this database (see module docstring and
     bf_agent_viewer/retention/prune.py)."""
-    rows = conn.execute(
-        "SELECT id, occurred_at, agent_id, event_type, action, resource_id, content_hash "
+    cur = conn.execute(
+        "SELECT id, event_version, occurred_at, organization_id, agent_id, session_id, "
+        "actor_human_id, event_type, action, tool_id, resource_id, environment, source, "
+        "result, request_id, metadata, content_hash "
         "FROM events ORDER BY created_at, rowid"
-    ).fetchall()
+    )
+    cols = [d[0] for d in cur.description]
 
     prev_hash = _latest_checkpoint_hash(conn) or "GENESIS"
-    for event_id, occurred_at, agent_id, event_type, action, resource_id, stored_hash in rows:
-        payload = {
-            "id": event_id,
-            "occurred_at": occurred_at,
-            "agent_id": agent_id,
-            "event_type": event_type,
-            "action": action,
-            "resource_id": resource_id,
-        }
-        expected = hashlib.sha256(
-            (prev_hash + json.dumps(payload, sort_keys=True)).encode()
-        ).hexdigest()
-        if expected != stored_hash:
-            return False, event_id
+    for row in cur.fetchall():
+        fields = dict(zip(cols, row))
+        stored_hash = fields.pop("content_hash")
+        version = fields.pop("event_version")
+        if version not in ("v1", "v2"):
+            return False, fields["id"]  # unknown version: fail closed
+        if _chain_hash(prev_hash, version, fields) != stored_hash:
+            return False, fields["id"]
         prev_hash = stored_hash
     return True, None

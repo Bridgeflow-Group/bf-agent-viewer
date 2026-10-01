@@ -40,6 +40,7 @@ def build_gateway(
     prefer_container: bool = True,
     gap_threshold_seconds: float = DEFAULT_GAP_THRESHOLD_SECONDS,
     credential_refresh_seconds: float = DEFAULT_CREDENTIAL_REFRESH_SECONDS,
+    require_token: bool = False,
 ) -> tuple[FastMCP, GatewayMiddleware]:
     policy = sandbox_policy or SandboxPolicy()
 
@@ -99,6 +100,7 @@ def build_gateway(
         rate_limiter=rate_limiter,
         alert_channel=alert_channel,
         credential_refresh_seconds=credential_refresh_seconds,
+        require_token=require_token,
     )
     gateway.add_middleware(middleware)
 

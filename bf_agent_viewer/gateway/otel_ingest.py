@@ -178,6 +178,14 @@ def register_otel_ingest_route(gateway, middleware) -> None:
                           "register a new one or have this one renewed"},
                 status_code=401,
             )
+        elif middleware.require_token:
+            # No token at all, and this gateway requires one: reject
+            # before discovery so an unauthenticated caller can't mint
+            # agent rows or alerts by varying gen_ai.agent.name.
+            return JSONResponse(
+                {"error": "this gateway requires a credential (X-BF-Agent-Token) -- none was presented"},
+                status_code=401,
+            )
         else:
             # Same passive-discovery path the MCP gateway falls back to
             # (identity/discovery.py) -- reused as-is by handing it a

@@ -170,7 +170,10 @@ def cmd_gateway(args: argparse.Namespace) -> None:
         prefer_container=not args.no_container,
         gap_threshold_seconds=args.gap_threshold,
         credential_refresh_seconds=args.credential_refresh_seconds,
+        require_token=args.require_token,
     )
+    if not args.require_token:
+        print("WARNING: --require-token is off -- a caller that sends no credential is let through UNSCOPED, so a revoked or scoped agent can bypass the kill switch/scope limits by omitting its token. Pass --require-token (BF_REQUIRE_TOKEN=1) to close this.")
     if args.no_container:
         print("Backend sandboxing: rlimit-only (--no-container passed) -- filesystem/network isolation from the sandboxed container path is NOT in effect.")
     print(f"Gateway running at http://{args.host}:{args.port}/mcp -- proxying {args.backend_script}, write_tools={sorted(write_tools) or 'none'}")
@@ -378,6 +381,7 @@ def main(argv: list[str] | None = None) -> int:
     p_gateway.add_argument("--port", type=int, default=int(_env_default("BF_GATEWAY_PORT", "8941")))
     p_gateway.add_argument("--rate-limit", type=float, default=float(_env_default("BF_RATE_LIMIT", "5.0")), help="Steady tokens/sec per agent identity")
     p_gateway.add_argument("--rate-burst", type=float, default=float(_env_default("BF_RATE_BURST", "20.0")))
+    p_gateway.add_argument("--require-token", action="store_true", default=_env_default("BF_REQUIRE_TOKEN", "") not in ("", "0", "false", "False"), help="Reject calls that present no credential instead of letting them through unscoped (BF_REQUIRE_TOKEN). Needed for the kill switch and scope limits to bind agents that stop sending their token.")
     p_gateway.add_argument("--no-container", action="store_true", default=_env_default("BF_NO_CONTAINER", "") not in ("", "0", "false", "False"), help="Force the rlimit-only sandbox path even if Docker is available (BF_NO_CONTAINER) -- the compose deployment sets this; see docker-compose.yml for why")
     p_gateway.add_argument("--alert-webhook", default=_env_default("BF_ALERT_WEBHOOK"), help="URL to POST a JSON alert to, e.g. on rate-limit rejection (F-036) (BF_ALERT_WEBHOOK)")
     p_gateway.add_argument("--alert-email-to", default=_env_default("BF_ALERT_EMAIL_TO"), help="Comma-separated recipient addresses (BF_ALERT_EMAIL_TO)")

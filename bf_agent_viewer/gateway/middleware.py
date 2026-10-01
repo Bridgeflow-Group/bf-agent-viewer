@@ -100,7 +100,16 @@ class GatewayMiddleware(Middleware):
         rate_limiter: TokenBucketLimiter | None = None,
         alert_channel: AlertChannel | None = None,
         credential_refresh_seconds: float = DEFAULT_CREDENTIAL_REFRESH_SECONDS,
+        require_token: bool = False,
     ):
+        # require_token: when True, a call presenting NO token is rejected
+        # (after being logged and passively discovered, so it stays
+        # visible). When False (default, v0.1.0 visibility-first posture)
+        # it is let through unscoped -- which means a revoked or scoped
+        # agent can shed its restrictions simply by omitting the header.
+        # Turn this on wherever the kill switch (F-009) or scope
+        # enforcement (F-043) must bind agents that are not cooperating.
+        self.require_token = require_token
         self.conn = conn
         self.organization_id = organization_id
         self.write_tools = write_tools
@@ -291,6 +300,23 @@ class GatewayMiddleware(Middleware):
                 )
                 self.conn.commit()
                 self._fire_discovery_alert(agent_id, client_info)
+            if self.require_token:
+                _, self.running_hash = log_event(
+                    self.conn, organization_id=self.organization_id, agent_id=agent_id,
+                    session_id=None, actor_human_id=None, event_type="tool.rejected_no_token",
+                    action="write" if tool_name in self.write_tools else "read", tool_id=tool_name,
+                    result="denied",
+                    metadata={
+                        "arguments": args,
+                        "reason": "no credential presented and this gateway requires one",
+                        "client_info_asserted": str(client_info) if client_info else None,
+                    },
+                    prev_hash=self.running_hash,
+                )
+                self.conn.commit()
+                raise PermissionError(
+                    "this gateway requires a credential (X-BF-Agent-Token) -- none was presented"
+                )
 
         # F-047: a heartbeat isn't a real capability -- it doesn't touch
         # the backend, doesn't need to be in anyone's granted_scope, and
