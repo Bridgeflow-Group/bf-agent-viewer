@@ -254,7 +254,7 @@ class GatewayMiddleware(Middleware):
                         session_id=None, actor_human_id=None, event_type="agent.discovered",
                         action=None, tool_id=None, result="success",
                         metadata={"client_info_asserted": str(client_info) if client_info else None},
-                        prev_hash=self.running_hash,
+                        prev_hash=None,  # chain from the DB tip: other processes (CLI) also write events
                     )
                     self.conn.commit()
                     self._fire_discovery_alert(agent_id, client_info)
@@ -269,7 +269,7 @@ class GatewayMiddleware(Middleware):
                               "(revoked, expired, or invalid)",
                     "client_info_asserted": str(client_info) if client_info else None,
                 },
-                prev_hash=self.running_hash,
+                prev_hash=None,  # chain from the DB tip: other processes (CLI) also write events
             )
             self.conn.commit()
             raise PermissionError(
@@ -296,7 +296,7 @@ class GatewayMiddleware(Middleware):
                     session_id=None, actor_human_id=None, event_type="agent.discovered",
                     action=None, tool_id=None, result="success",
                     metadata={"client_info_asserted": str(client_info) if client_info else None},
-                    prev_hash=self.running_hash,
+                    prev_hash=None,  # chain from the DB tip: other processes (CLI) also write events
                 )
                 self.conn.commit()
                 self._fire_discovery_alert(agent_id, client_info)
@@ -311,7 +311,7 @@ class GatewayMiddleware(Middleware):
                         "reason": "no credential presented and this gateway requires one",
                         "client_info_asserted": str(client_info) if client_info else None,
                     },
-                    prev_hash=self.running_hash,
+                    prev_hash=None,  # chain from the DB tip: other processes (CLI) also write events
                 )
                 self.conn.commit()
                 raise PermissionError(
@@ -339,7 +339,7 @@ class GatewayMiddleware(Middleware):
                 session_id=None, actor_human_id=None, event_type="tool.rate_limited",
                 action=action, tool_id=tool_name, result="denied",
                 metadata={"arguments": args, "reason": "rate limit exceeded"},
-                prev_hash=self.running_hash,
+                prev_hash=None,  # chain from the DB tip: other processes (CLI) also write events
             )
             self.conn.commit()
             # security.md's own stated promise: "a rejection itself is
@@ -375,7 +375,7 @@ class GatewayMiddleware(Middleware):
                     "parent_identity_id": identity.parent_identity_id,
                     "client_info_asserted": str(client_info) if client_info else None,
                 },
-                prev_hash=self.running_hash,
+                prev_hash=None,  # chain from the DB tip: other processes (CLI) also write events
             )
             self.conn.commit()
             raise PermissionError(
@@ -406,7 +406,7 @@ class GatewayMiddleware(Middleware):
                     "parent_identity_id": identity.parent_identity_id if identity else None,
                     "error": error,
                 },
-                prev_hash=self.running_hash,
+                prev_hash=None,  # chain from the DB tip: other processes (CLI) also write events
             )
             self.conn.commit()
         return result
@@ -460,7 +460,7 @@ class GatewayMiddleware(Middleware):
             self.conn, organization_id=self.organization_id, agent_id=agent_id,
             session_id=None, actor_human_id=None, event_type=event_type,
             action=action, tool_id=tool_id, result=result, source="otel_sdk",
-            metadata=metadata, prev_hash=self.running_hash,
+            metadata=metadata, prev_hash=None,  # chain from the DB tip: other processes (CLI) also write events
         )
         self.conn.commit()
         return event_id
@@ -481,7 +481,7 @@ class GatewayMiddleware(Middleware):
             self.conn, organization_id=self.organization_id, agent_id=agent_id,
             session_id=None, actor_human_id=None, event_type="agent.heartbeat",
             action=None, tool_id=HEARTBEAT_TOOL_NAME, result="success", metadata={},
-            prev_hash=self.running_hash,
+            prev_hash=None,  # chain from the DB tip: other processes (CLI) also write events
         )
         self.conn.commit()
         return result

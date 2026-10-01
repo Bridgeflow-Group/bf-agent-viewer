@@ -15,12 +15,15 @@ path -- two shapes for the same field, both handled here explicitly.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import secrets
 import sqlite3
 import time
 from dataclasses import dataclass
 from typing import Any
+
+from bf_agent_viewer.events.log import log_event
 
 
 @dataclass(frozen=True)
@@ -35,9 +38,44 @@ def _now_str(offset_seconds: float = 0.0) -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + offset_seconds))
 
 
+def token_fingerprint(token: str) -> str:
+    """Short, non-secret identifier for a bearer token -- what credential
+    events record instead of the token itself (which is a live secret and
+    must never land in the permanent, exportable event log)."""
+    return hashlib.sha256(token.encode()).hexdigest()[:12]
+
+
+def _log_credential_event(
+    conn: sqlite3.Connection, token: str, event_type: str, *,
+    actor_human_id: str | None = None, **metadata: Any,
+) -> None:
+    """Write a credential.issued / .renewed / .revoked event into the
+    tamper-evident chain, in the caller's still-open transaction (the
+    caller commits, so the state change and its audit entry land
+    together). Chains from the database tip (prev_hash=None) because the
+    CLI runs in a different process from a live gateway. No-op if the
+    credential doesn't exist."""
+    row = conn.execute(
+        """SELECT c.agent_id, ag.organization_id, c.type, c.expiry
+           FROM credentials c JOIN agents ag ON ag.id = c.agent_id WHERE c.id = ?""",
+        (token,),
+    ).fetchone()
+    if row is None:
+        return
+    agent_id, organization_id, cred_type, expiry = row
+    log_event(
+        conn, organization_id=organization_id, agent_id=agent_id, session_id=None,
+        actor_human_id=actor_human_id, event_type=event_type, action=event_type.split(".")[1],
+        source="registry", result="success",
+        metadata={"credential": token_fingerprint(token), "credential_type": cred_type,
+                  "expiry": expiry, **metadata},
+        prev_hash=None,
+    )
+
+
 def issue_token(
     conn: sqlite3.Connection, *, agent_id: str, issuer: str = "bf-agent-viewer-gateway",
-    ttl_seconds: float | None = None,
+    ttl_seconds: float | None = None, actor_human_id: str | None = None,
 ) -> str:
     """Issue an opaque bearer token for an agent, stored in the existing
     `credentials` table. This is the real per-request identity mechanism
@@ -76,11 +114,14 @@ def issue_token(
            VALUES (?,?,?,?,?,?,?)""",
         (token, agent_id, "bearer_token", issuer, "active", now, expiry),
     )
+    _log_credential_event(conn, token, "credential.issued", actor_human_id=actor_human_id,
+                          ttl_seconds=ttl_seconds)
     conn.commit()
     return token
 
 
-def renew_token(conn: sqlite3.Connection, token: str, *, ttl_seconds: float) -> str:
+def renew_token(conn: sqlite3.Connection, token: str, *, ttl_seconds: float,
+                actor_human_id: str | None = None) -> str:
     """Push a short-lived credential's expiry back out by ttl_seconds from
     now. The other half of F-009's kill-switch mechanism (see OQ-004):
     an agent (or whatever schedules renewal on its behalf, e.g. an
@@ -108,11 +149,13 @@ def renew_token(conn: sqlite3.Connection, token: str, *, ttl_seconds: float) -> 
         raise ValueError(f"credential {token!r} already expired at {expiry} -- issue a new one instead of renewing")
     new_expiry = _now_str(ttl_seconds)
     conn.execute("UPDATE credentials SET expiry = ? WHERE id = ?", (new_expiry, token))
+    _log_credential_event(conn, token, "credential.renewed", actor_human_id=actor_human_id,
+                          ttl_seconds=ttl_seconds, previous_expiry=expiry)
     conn.commit()
     return new_expiry
 
 
-def revoke_token(conn: sqlite3.Connection, token: str) -> None:
+def revoke_token(conn: sqlite3.Connection, token: str, *, actor_human_id: str | None = None) -> None:
     """Immediately cut off a credential -- sets status='revoked' and
     records revoked_at, rather than waiting for a TTL to lapse. Works on
     any active credential, short-lived or standing (a v0.1.0 token issued
@@ -129,6 +172,8 @@ def revoke_token(conn: sqlite3.Connection, token: str) -> None:
         "UPDATE credentials SET status = 'revoked', revoked_at = ? WHERE id = ? AND status = 'active'",
         (now, token),
     )
+    if cursor.rowcount:
+        _log_credential_event(conn, token, "credential.revoked", actor_human_id=actor_human_id)
     conn.commit()
     if cursor.rowcount == 0:
         raise ValueError(f"no active credential {token!r} to revoke")

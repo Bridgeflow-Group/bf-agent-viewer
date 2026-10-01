@@ -127,7 +127,7 @@ async def test_concurrent_interleaved_identities_no_cross_contamination(gateway_
         assert blocked_events == 10
 
         allowed_events = conn.execute(
-            "SELECT COUNT(*) FROM events WHERE agent_id = 'agent-orchestrator' AND result = 'success'"
+            "SELECT COUNT(*) FROM events WHERE agent_id = 'agent-orchestrator' AND result = 'success' AND event_type NOT LIKE 'credential.%'"
         ).fetchone()[0]
         assert allowed_events == 10
     finally:

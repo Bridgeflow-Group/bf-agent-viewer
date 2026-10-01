@@ -263,7 +263,7 @@ async def test_unrecognized_presented_token_is_rejected_not_discovered(tmp_path)
 
     assert status == 401, body
     assert conn.execute("SELECT COUNT(*) FROM agents").fetchone()[0] == 0
-    assert conn.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM events WHERE event_type NOT LIKE 'credential.%'").fetchone()[0] == 0
 
 
 @pytest.mark.asyncio
@@ -355,7 +355,7 @@ async def test_malformed_event_is_rejected_with_400_not_silently_dropped(tmp_pat
     finally:
         await _stop(server_task)
 
-    count = conn.execute("SELECT COUNT(*) FROM events").fetchone()
+    count = conn.execute("SELECT COUNT(*) FROM events WHERE event_type NOT LIKE 'credential.%'").fetchone()
     assert count == (0,)
 
 
@@ -401,5 +401,5 @@ async def test_otel_events_extend_the_same_chain_as_mcp_events(tmp_path):
     assert ok, f"chain verification failed at {bad_id}"
     assert middleware.running_hash == last_hash(conn)
 
-    event_count = conn.execute("SELECT COUNT(*) FROM events").fetchone()
+    event_count = conn.execute("SELECT COUNT(*) FROM events WHERE event_type NOT LIKE 'credential.%'").fetchone()
     assert event_count == (2,)

@@ -123,11 +123,25 @@ def log_event(
     source: str = "mcp_gateway",
     result: str = "success",
     metadata: dict[str, Any] | None = None,
-    prev_hash: str,
+    prev_hash: str | None,
 ) -> tuple[str, str]:
     """Insert one tamper-evident event row. Returns (event_id, new_hash) --
     the caller must hold onto new_hash and pass it as prev_hash on the next
-    call from this writer."""
+    call from this writer.
+
+    prev_hash=None means "chain from the database's current tip": a write
+    lock is taken first (BEGIN IMMEDIATE, unless a transaction is already
+    open) and the tip is read inside it, so the read and the insert are
+    atomic against other writers. Use this whenever more than one process
+    can write events -- e.g. the CLI revoking a credential while a gateway
+    is running -- otherwise each writer's in-memory tip goes stale and the
+    chain forks. The cost is one indexed lookup (ORDER BY rowid DESC LIMIT
+    1), unlike the unindexed created_at scan behind ISS-008. The caller
+    still commits."""
+    if prev_hash is None:
+        if not conn.in_transaction:
+            conn.execute("BEGIN IMMEDIATE")
+        prev_hash = last_hash(conn)
     event_id = new_id()
     occurred_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     request_id = new_id()

@@ -77,7 +77,7 @@ async def test_heartbeat_logs_a_distinct_event_type_not_tool_called(tmp_path):
     await _run_gateway_and_call(conn, port=8951, token=token, tool_name=HEARTBEAT_TOOL_NAME)
 
     row = conn.execute(
-        "SELECT event_type, agent_id, tool_id, result FROM events WHERE agent_id = 'agent-1'"
+        "SELECT event_type, agent_id, tool_id, result FROM events WHERE agent_id = 'agent-1' AND event_type NOT LIKE 'credential.%'"
     ).fetchone()
     assert row == ("agent.heartbeat", "agent-1", HEARTBEAT_TOOL_NAME, "success")
 
